@@ -9,7 +9,7 @@ def is_distinct(token):
     return token.pos_ == "PROPN" or (token.pos_ == "NOUN" and any(child.dep_ == "det" and child.text.lower == "the" for child in token.children))
 
 def is_regular(token):
-    return token.pos_ in ["NOUN", "VERB", "PRON", "ADJ"]
+    return token.pos_ in ["NOUN", "VERB", "PRON", "ADJ", "ADV"]
 
 def ref(token):
     if is_regular(token):
@@ -60,7 +60,7 @@ def follow(token, text):
             found.append(f"{text}({child})")
             if other:
                 found.extend(other)
-        elif is_regular(child):
+        elif is_regular(child) and child.pos_ not in ["ADJ", "ADV"]:
             other = follow(child, text)
             found.append(f"{text}({ref(child)})")
             if other:
@@ -142,24 +142,24 @@ tests = [
 
     # --- SUBJECT-VERB-OBJECT EXAMPLES --- #
     
-    # "Flowers bloom in the garden",
-    # "Sam surpasses Bob in height",
+    "Flowers bloom in the garden",
+    "Sam surpasses Bob in height",
     "Sam feels that (Bob likes tall Mary) and Jerry like Sam",
-    # "Sam feels happy and confident",
-    # "Sam likes Mary",
-    # "Singers perform songs",
-    # "dancers move gracefully",
-    # "A big dog barked",
-    # "the tall boy and a small girl does not like a coffee",
-    # "John and Sam gave a book and a toy to a tall girl and tall Mary",
-    # "a boy broke a window with a hammer at school",
-    # "A cat sleeps",
-    # "Sam built a small house",
-    # "the tall sweet girl and nice Mary killed a small man",
-    # "a man was killed by a police_member",
-    # "a boy does not strongly believes a dog",
-    # "Sam played with a boy",
-    # "Sam laughed and Sara slept",
+    "Sam feels happy and confident",
+    "Sam likes Mary",
+    "Singers perform songs",
+    "dancers move gracefully",
+    "A big dog barked",
+    "the tall boy and a small girl does not like a coffee",
+    "John and Sam gave a book and a toy to a tall girl and tall Mary",
+    "a boy broke a window with a hammer at school",
+    "A cat sleeps",
+    "Sam built a small house",
+    "the tall sweet girl and nice Mary killed a small man",
+    "a man was killed by a police_member",
+    "a boy does not strongly believes a dog",
+    "Sam played with a boy",
+    "Sam laughed and Sara slept",
     
     # --- AUX EXAMPLES --- #
 
