@@ -180,7 +180,7 @@ def snepslog(token):
                         # detach any extra conjuncts that belong to the complement
                         if " & " in child_repr:          # e.g. like(Bob, Mary) & tall(Mary)
                             core, rest = child_repr.split(" & ", 1)
-                            args.append(f"({core})")     # <- only the core stays an argument
+                            args.append(f"{core}")     # <- only the core stays an argument
                             mods.append(rest)            # <- extras are lifted to this level
                         else:
                             args.append(f"({child_repr})")
@@ -250,6 +250,7 @@ def snepslog(token):
 
             res = f""
             other = f""
+            neg=False
 
             for child in token.children:
                 match child.dep_:
@@ -268,6 +269,10 @@ def snepslog(token):
                         pass
                     case "attr":
                         res = f"{surround(child, res)}"
+                    case "neg":
+                        neg = True
+            if neg:
+                res = f"~{res}"
             if other:
                 res = f"{res} & {other}"
             return res
@@ -294,7 +299,7 @@ tests = [
     # "Sam feels happy and confident",
     # "Sam likes Mary",
     # "Singers perform songs",
-    "dancers move gracefully",
+    # "dancers move gracefully",
     # "A big dog barked",
     # "the tall boy and a small girl does not like a coffee",
     # "John and Sam gave a book and a toy to a tall girl and tall Mary",
@@ -321,12 +326,20 @@ tests = [
     # "the boy and the girl are tall",
     # "Sam is taller than Bob and Jake",
     # "Sam is taller than a small boy",
+    # "long Sam is not tall",
+
+    # --- Given Examples --- #
+
+    # "the dancers jumped",
+    # "The bear viciously attacked the camper",
+    # "Sam believes that Bob is taller than John",
+
 
     # -- Odd Examples -- #
 
     # "Sam is equal to Bob"
     # "Sam has the ability to run",
-    # "Sam and Bob and Jerry like a dog", # SpaCy decided to die on this one.
+    # "Sam, Bob, and Jerry like a dog", # SpaCy decided to die on this one.
     # "Fido is a member of the class dog",
     # "Fido belongs to the class dog.",
 ]
