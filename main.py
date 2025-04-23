@@ -251,7 +251,8 @@ def snepslog(token):
                         if get_modifiers(child):
                                 res = f"{res} & {' & '.join(get_modifiers(child))}"
                     case "prep":
-                        res = f"{res} & {child.text}({ref}, {group_set(child)})"
+                        #TODO: Find a way to deal with multi - preps
+                        # res = f"{res} & {child.text}({ref}, {group_set(child)})"
                         if get_modifiers(child):
                                 res = f"{res} & {' & '.join(get_modifiers(child, ref))}"
                     case "amod" | "advmod":
@@ -342,7 +343,7 @@ tests = [
     # "a boy does not strongly believes a dog",
     # "Sam played with a boy",
     # "Sam loves a lovely girl",
-    "Sam gives a book to mary to bob"
+    # "Sam gives a book to Mary",
     # "the fat man died",
     # "the boy loves to pet a dog",
     # "Sam laughed and Sara slept",
@@ -381,4 +382,4 @@ tests = [
 for test in tests:
     doc = nlp(test)
     root = [token for token in doc if token.dep_ == "ROOT"][0]
-    print(test, " ≡ ", snepslog(root))
+    print(test, " ➡ ", snepslog(root))
