@@ -3,15 +3,20 @@ import spacy
 nlp = spacy.load("en_core_web_trf")
 
 def has_dep(token, dep):
+    """Checks if a token has a child with a specific dependency."""
     return any(child.dep_ == dep for child in token.children)
 
 def is_distinct(token):
+    """Checks if a token is distinct, for example: Sam, Bob, Mary, etc."""
     return token.pos_ == "PROPN"
 
 def is_regular(token):
+    """Checks if a token is a regular token, for example: dog, cat, run, etc."""
     return token.pos_ in ["NOUN", "VERB", "PRON", "ADJ", "ADV"]
 
+#TODO: Make the reference more precise to avoid duplications.
 def ref(token):
+    """Creates the variables that references a token."""
     if is_regular(token):
         return token.text[0] + f"{len(token.text)}"
     else:
@@ -22,7 +27,7 @@ def ref(token):
         return None
 
 def ref_event(token):
-    return 'e' + f"{len(list(token.children))}"
+    return 'e' + token.text[0] + f"{len(list(token.children))}"
 
 def _get_modifiers(token, reference):
     mods = []
@@ -82,7 +87,8 @@ def follow(token, text, reference=None):
     return found
 
 def is_event(root):
-    return root.tag_ in ["VBP", "VBD", "VBG", "VB"]
+    # return root.tag_ in ["VBP", "VBD", "VBG"]
+    return root.tag_ in ["VBP", "VBD", "VBG", "VB", "VBZ"]
 
 def group(token):
     logic = next((child for child in token.children if child.dep_ == "cc"), None)
@@ -147,7 +153,10 @@ def surround(wrap, obj):
     mods.append(wrap)
     for child in wrap.children:
         if child.dep_ in ["amod", "advmod"]:
-            mods.extend(_surround(child))
+            mods.append(child)
+            other = _surround(child)
+            if other:
+                mods.extend(_surround(child))
     for mod in mods:
         res = f"{mod}({res})"
     
@@ -158,6 +167,7 @@ def is_logical(token):
 
 def snepslog(token):
     match token.pos_:
+        # the case if the root node is a VERB, but a simple verb like believe, taller than, and so on
         case "VERB" if not is_event(token):
             args = []
             mods = []
@@ -174,7 +184,7 @@ def snepslog(token):
                         mods.extend(get_modifiers(child))
                     case "amod" | "advmod":
                         verb_mods.append(child)
-                    case "ccomp":
+                    case "ccomp" | "xcomp":
 
                         child_repr = snepslog(child)
                         # detach any extra conjuncts that belong to the complement
@@ -206,6 +216,7 @@ def snepslog(token):
                 res = f"~{res}"
 
             return res
+        
         case "VERB" if is_event(token):
             
             ref = ref_event(token)
@@ -232,6 +243,8 @@ def snepslog(token):
                         res = f"{res} & dative({ref}, {group_set(child)})"
                         if get_modifiers(child):
                                 res = f"{res} & {' & '.join(get_modifiers(child))}"
+                    case "xcomp" | "ccomp":
+                        res = f"{res} & {snepslog(child)}"
                     case "neg":
                         neg = True
 
@@ -245,7 +258,7 @@ def snepslog(token):
             if other:
                 res = res + other
             return res
-
+        # the case if the root node is an AUX
         case "AUX":
 
             res = f""
@@ -313,6 +326,7 @@ tests = [
     # "Sam played with a boy",
     # "Sam loves a lovely girl",
     # "the fat man died",
+    # "the boy loves to pet a dog",
     # "Sam laughed and Sara slept",
     
     # --- AUX EXAMPLES --- #
@@ -321,6 +335,7 @@ tests = [
     # "John and Bob are happy",
     # "Bob and Sam are human",
     # "Sam and Jerry and Bob are friends",
+    # "Sam and Jerry and Bob are good friends",
     # "the tall girl is cute",
     # "a tall girl is cute",
     # "the boy and the girl are tall",
@@ -344,6 +359,7 @@ tests = [
     # "Fido belongs to the class dog.",
 ]
 
+# Main part that runs the list of tests
 for test in tests:
     doc = nlp(test)
     root = [token for token in doc if token.dep_ == "ROOT"][0]
