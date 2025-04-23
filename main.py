@@ -27,8 +27,10 @@ def ref(token):
         return None
 
 def ref_event(token):
+    """Creates a variable that references an event."""
     return 'e' + token.text[0] + f"{len(list(token.children))}"
 
+# Helper function for get_modifiers
 def _get_modifiers(token, reference):
     mods = []
     for child in token.children:
@@ -45,7 +47,7 @@ def _get_modifiers(token, reference):
     return mods
 
 def get_modifiers(token, reference=None):
-
+    """Returns a list of all the modifiers of the given token."""
     if token.pos_ == "VERB" or is_distinct(token):
         res = _get_modifiers(token, token)
         if token.tag_ in ["NNPS", "NNS"]:
@@ -66,6 +68,13 @@ def get_modifiers(token, reference=None):
         return res
 
 def follow(token, text, reference=None):
+    """
+    Give a sentences "like Sam gives a book to Mary" the dative of the root token is the token "to"
+    we need to make sure that we follow every entity after that with that 'to' like this:
+    to(e??, Mary) to specify that in that event the one given was Mary.
+
+    The function follows these entities and returns a list of all the ones it has found.
+    """
     found = []
     for child in token.children:
         if is_distinct(child):
@@ -86,11 +95,14 @@ def follow(token, text, reference=None):
                 found.extend(other)
     return found
 
+#TODO: Find a better way to identify the if the sentence is an event or not.
 def is_event(root):
+    """Checks whether the root token is an event."""
     # return root.tag_ in ["VBP", "VBD", "VBG"]
     return root.tag_ in ["VBP", "VBD", "VBG", "VB", "VBZ"]
 
 def group(token):
+    """Groups all the entities logically together."""
     logic = next((child for child in token.children if child.dep_ == "cc"), None)
     conj = next((child for child in token.children if child.dep_ == "conj"), None)
     if is_distinct(token):
@@ -111,6 +123,7 @@ def group(token):
         return group(next((child for child in token.children), None))
 
 def group_set(token):
+    """returns a set of all the entities grouped together."""
     res = []
     conjs = list(token.conjuncts)
     if conjs:
@@ -136,7 +149,7 @@ def group_set(token):
         elif is_regular(token):
             return ref(token)
 
-
+# Helper function for surround to grab any other child of child modifiers
 def _surround(token):
     mods = []
     for child in token.children:
@@ -148,6 +161,7 @@ def _surround(token):
     return mods
 
 def surround(wrap, obj):
+    """Surrounds anything with it's modifiers"""
     res = obj
     mods = []
     mods.append(wrap)
@@ -163,9 +177,11 @@ def surround(wrap, obj):
     return res
 
 def is_logical(token):
+    """Checks if a token is a logical conjunction."""
     return any(child.dep_ == "cc" for child in token.children)
 
 def snepslog(token):
+    """Returns the snepslog representation of a token of a sentence."""
     match token.pos_:
         # the case if the root node is a VERB, but a simple verb like believe, taller than, and so on
         case "VERB" if not is_event(token):
@@ -195,12 +211,12 @@ def snepslog(token):
                         else:
                             args.append(f"({child_repr})")
 
+            # in case the main verb had conjunctives, deal with those separately 
             if any(child.dep_ in ["cc", "conj"] for child in token.children):
                 cc = next((child for child in token.children if child.dep_ == "cc"), None)
                 conj = next((child for child in token.children if child.dep_ == "conj"), None)
                 other = f" {cc} {snepslog(conj)}"
 
-            
             res = f"{res}({', '.join(args)})"
             
             if verb_mods:
@@ -235,12 +251,13 @@ def snepslog(token):
                         if get_modifiers(child):
                                 res = f"{res} & {' & '.join(get_modifiers(child))}"
                     case "prep":
+                        res = f"{res} & {child.text}({ref}, {group_set(child)})"
                         if get_modifiers(child):
                                 res = f"{res} & {' & '.join(get_modifiers(child, ref))}"
                     case "amod" | "advmod":
                         res = f"{res} & {child}({ref})"
                     case "dative":
-                        res = f"{res} & dative({ref}, {group_set(child)})"
+                        res = f"{res} & {child.text}({ref}, {group_set(child)})"
                         if get_modifiers(child):
                                 res = f"{res} & {' & '.join(get_modifiers(child))}"
                     case "xcomp" | "ccomp":
@@ -325,6 +342,7 @@ tests = [
     # "a boy does not strongly believes a dog",
     # "Sam played with a boy",
     # "Sam loves a lovely girl",
+    "Sam gives a book to mary to bob"
     # "the fat man died",
     # "the boy loves to pet a dog",
     # "Sam laughed and Sara slept",
