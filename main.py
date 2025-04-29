@@ -1,10 +1,15 @@
 import spacy
+import spacy
+import hashlib
 
 nlp = spacy.load("en_core_web_trf")
 
 def has_dep(token, dep):
     """Checks if a token has a child with a specific dependency."""
     return any(child.dep_ == dep for child in token.children)
+
+def is_many(token):
+    return token.tag_ in ["NNS", "NNPS"]
 
 def is_distinct(token):
     """Checks if a token is distinct, for example: Sam, Bob, Mary, etc."""
@@ -14,21 +19,70 @@ def is_regular(token):
     """Checks if a token is a regular token, for example: dog, cat, run, etc."""
     return token.pos_ in ["NOUN", "VERB", "PRON", "ADJ", "ADV"]
 
+def create_var(input_string: str, seed = 0, x = 3):
+    """
+    Generates a hash of length x for a given string and seed.
+
+    Uses SHA-256 hashing combined with the seed, and then truncates the
+    hexadecimal output to the specified length x.
+
+    Note: If x is greater than the length of the SHA-256 hexdigest (64),
+    the function will return the full 64-character hexdigest.
+
+    Args:
+        input_string: The string to hash.
+        seed: A seed number to incorporate into the hash.
+        x: The desired length of the hash string.
+
+    Returns:
+        A string representing the hash of length x (or 64 if x > 64).
+    """
+    # Combine the input string and the seed
+    combined_input = f"{input_string}-{seed}"
+
+    # Encode the combined input to bytes (required by hashlib)
+    encoded_input = combined_input.encode('utf-8')
+
+    # Create a SHA-256 hash object
+    hasher = hashlib.sha256()
+
+    # Update the hash object with the encoded input
+    hasher.update(encoded_input)
+
+    # Get the hexadecimal representation of the hash
+    hex_digest = hasher.hexdigest()
+
+    # Truncate the hash to the desired length x
+    # Ensure x does not exceed the maximum length of the hexdigest
+    truncated_hash = hex_digest[:min(x, len(hex_digest))]
+
+    return truncated_hash
+
 #TODO: Make the reference more precise to avoid duplications.
-def ref(token):
+def ref(token, seed = 0, size=3):
     """Creates the variables that references a token."""
     if is_regular(token):
-        return token.text[0] + f"{len(token.text)}"
+        return create_var(token.text, seed, size)
     else:
         for child in token.children:
                 res = ref(child)
                 if res:
                     return res
-        return None
+
+def get_refs(token, seed=0, size=3):
+    refs = []
+    if is_regular(token):
+        conjs = list(token.conjuncts)
+        if conjs:
+            for conj in conjs:
+                refs.append(ref(conj, seed, size))
+        refs.append(ref(token, seed, size))
+    return refs
+
 
 def ref_event(token):
     """Creates a variable that references an event."""
-    return 'e' + token.text[0] + f"{len(list(token.children))}"
+    return 'e' + ref(token)
 
 # Helper function for get_modifiers
 def _get_modifiers(token, reference):
@@ -50,8 +104,6 @@ def get_modifiers(token, reference=None):
     """Returns a list of all the modifiers of the given token."""
     if token.pos_ == "VERB" or is_distinct(token):
         res = _get_modifiers(token, token)
-        if token.tag_ in ["NNPS", "NNS"]:
-            res.append(f"group({token})")
         return res
     elif is_regular(token):
         res = _get_modifiers(token, ref(token))
@@ -183,131 +235,130 @@ def is_logical(token):
 def snepslog(token):
     """Returns the snepslog representation of a token of a sentence."""
     match token.pos_:
-        # the case if the root node is a VERB, but a simple verb like believe, taller than, and so on
-        case "VERB" if not is_event(token):
-            args = []
-            mods = []
-            other = ""
-            res = f"{token.lemma_}"
-            verb_mods = []
-            neg = False
-            for child in token.children:
-                match child.dep_:
-                    case "neg":
-                        neg = True
-                    case "nsubj" | "dobj" | "prep" | "dative" | "nsubjpass" | "agent" | "acomp":
-                        args.append(group_set(child))
-                        mods.extend(get_modifiers(child))
-                    case "amod" | "advmod":
-                        verb_mods.append(child)
-                    case "ccomp" | "xcomp":
-
-                        child_repr = snepslog(child)
-                        # detach any extra conjuncts that belong to the complement
-                        if " & " in child_repr:          # e.g. like(Bob, Mary) & tall(Mary)
-                            core, rest = child_repr.split(" & ", 1)
-                            args.append(f"{core}")     # <- only the core stays an argument
-                            mods.append(rest)            # <- extras are lifted to this level
-                        else:
-                            args.append(f"({child_repr})")
-
-            # in case the main verb had conjunctives, deal with those separately 
-            if any(child.dep_ in ["cc", "conj"] for child in token.children):
-                cc = next((child for child in token.children if child.dep_ == "cc"), None)
-                conj = next((child for child in token.children if child.dep_ == "conj"), None)
-                other = f" {cc} {snepslog(conj)}"
-
-            res = f"{res}({', '.join(args)})"
-            
-            if verb_mods:
-                for verb_mod in verb_mods:
-                    res = surround(verb_mod, res)
-            
-            if mods:
-                res = f"{res} & {' & '.join(mods)}"
-            if other:
-                res = res + other
-
-            if neg:
-                res = f"~{res}"
-
-            return res
         
-        case "VERB" if is_event(token):
+        case "VERB":
             
             ref = ref_event(token)
-            res = f"{token.lemma_}({ref})"
-            other = f""
+            res = []
+
+            after = []
+            before = []
+            mods = []
+            vars = []
+            
+            other = []
             neg = False
+            many = False 
 
             for child in token.children:
                 match child.dep_:
+                    
                     case "nsubj" | "nsubjpass":
-                        res = f"{res} & agent({ref}, {group_set(child)})"
-                        if get_modifiers(child):
-                                res = f"{res} & {' & '.join(get_modifiers(child))}"
+                        
+                        if not is_many(child):
+                            res.append(f"agent({ref}, {group_set(child)})")
+                            if get_modifiers(child):
+                                    res.extend(get_modifiers(child))
+                        else:
+                            many = True
+                            before.append(f"member({create_var('something')}, {group_set(child)})")
+                            tmp = []
+                            tmp.append(f"{child.lemma_}({create_var('something')})")
+                            if conjs := list(child.conjuncts):
+                                for conj in conjs:
+                                    tmp.append(f"{conj.lemma_}({create_var('something')})")
+                            after.append(f"({' or '.join(tmp)})")
+                            vars.append(create_var('something'))
+                            if get_modifiers(child):
+                                    mods.extend(get_modifiers(child))
+
                     case "dobj" | "agent":
-                        res = f"{res} & object({ref}, {group_set(child)})"
+
+                        res.append(f"object({ref}, {group_set(child)})")
                         if get_modifiers(child):
-                                res = f"{res} & {' & '.join(get_modifiers(child))}"
+                                res.extend(get_modifiers(child))
+
                     case "prep":
-                        #TODO: Find a way to deal with multi - preps
-                        # res = f"{res} & {child.text}({ref}, {group_set(child)})"
+                        if not is_many(child):
+
+                            #TODO: Find a way to deal with multi - preps
+                            # res = f"{res} & {child.text}({ref}, {group_set(child)})"
+
+                            if get_modifiers(child):
+                                    res.extend(get_modifiers(child, ref))
+                        else:
+                            many = True
+                            tmp = f"{ref}({create_var('something')})"
+                            after.append(f"{get_modifiers(child, tmp)}")
+
+                    case "acomp":
+                        
+                        res.append(f"acomp({ref}, {group_set(child)})")
                         if get_modifiers(child):
-                                res = f"{res} & {' & '.join(get_modifiers(child, ref))}"
+                                res.extend(get_modifiers(child, ref))
+
                     case "amod" | "advmod":
-                        res = f"{res} & {child}({ref})"
+                        
+                        res.append(f"{child}({ref})")
+                    
                     case "dative":
-                        res = f"{res} & {child.text}({ref}, {group_set(child)})"
+                    
+                        res.append(f"{child.text}({ref}, {group_set(child)})")
                         if get_modifiers(child):
-                                res = f"{res} & {' & '.join(get_modifiers(child))}"
+                                res.extend(get_modifiers(child))
+                    
                     case "xcomp" | "ccomp":
-                        res = f"{res} & {snepslog(child)}"
+                    
+                        res.append(snepslog(child))
+                    
                     case "neg":
                         neg = True
 
-            if any(child.dep_ in ["cc", "conj"] for child in token.children):
-                cc = next((child for child in token.children if child.dep_ == "cc"), None)
-                conj = next((child for child in token.children if child.dep_ == "conj"), None)
-                other = f" {cc} {snepslog(conj)}"
+            if not many:
+                res = [f"{token.text}({ref_event(token)})"] + res
+                return (' and '.join(res)) if not neg else negate(res)
+            else:
+                mods.extend(res)
+                ev = f"{ref}({create_var('something')})"
+                ver = f"{token.text}({ev})"
+                ag = f"agent({ev}, {create_var('something')})"
+                after.extend([ev, ver, ag])
+                result = f"all({', '.join(vars)})({' and '.join(before)} => ({' and '.join(after)})) and {' and '.join(mods)}"
+                return result if not neg else negate(result)
 
-            if neg:
-                res = f"~{res}"
-            if other:
-                res = res + other
-            return res
+            
         # the case if the root node is an AUX
         case "AUX":
 
-            res = f""
-            other = f""
+            res = []
+            other = []
             neg=False
+            subj = None
 
             for child in token.children:
                 match child.dep_:
                     case "nsubj":
-                        res = f"{group_set(child)}"
+                        subj = group_set(child)
                         if get_modifiers(child):
-                            other = f"{' & '.join(get_modifiers(child))}"
+                            other.extend(get_modifiers(child))
                     case "acomp" if child.tag_ == "JJ":
-                        res = f"{surround(child, res)}"
+                        res.append(surround(child, subj))
                     case "acomp" if child.tag_ == "JJR":
                         skip = next((child for child in child.children))
-                        res = f"{child}({res}, {group_set(skip)})"
+                        res.append(f"{child}({subj}, {group_set(skip)})")
                         if get_modifiers(skip):
-                            other = f"{' & '.join(get_modifiers(skip))}"
+                            other.extend(get_modifiers(skip))
                     case "ccomp":
                         pass
                     case "attr":
-                        res = f"{surround(child, res)}"
+                        res = f"{surround(child, subj)}"
                     case "neg":
                         neg = True
             if neg:
-                res = f"~{res}"
+                pass
             if other:
-                res = f"{res} & {other}"
-            return res
-
+                res.extend(other)
+            return ' and '.join(res)
             
 
     # Default case: General processing & fallthrough from cases above that didn't return
@@ -329,8 +380,9 @@ tests = [
     # "Sam feels that Bob likes tall Mary",
     # "Sam feels happy and confident",
     # "Sam likes Mary",
+    # "dancers feel happy",
     # "Singers perform songs",
-    # "dancers move gracefully",
+    # "dancers and singers move gracefully",
     # "A big dog barked",
     # "the tall boy and a small girl does not like a coffee",
     # "John and Sam gave a book and a toy to a tall girl and tall Mary",
@@ -375,11 +427,11 @@ tests = [
     # "Sam has the ability to run",
     # "Sam, Bob, and Jerry like a dog", # SpaCy decided to die on this one.
     # "Fido is a member of the class dog",
-    # "Fido belongs to the class dog.",
+    # "Fido belongs to the class_dog.",
 ]
 
 # Main part that runs the list of tests
 for test in tests:
     doc = nlp(test)
     root = [token for token in doc if token.dep_ == "ROOT"][0]
-    print(test, " ➡ ", snepslog(root))
+    print(test, " ➡ ", snepslog(root)+'.', "\n")
