@@ -1,6 +1,6 @@
 import spacy
-import spacy
 import hashlib
+from Logica.logica import *
 
 nlp = spacy.load("en_core_web_trf")
 
@@ -9,7 +9,7 @@ def has_dep(token, dep):
     return any(child.dep_ == dep for child in token.children)
 
 def is_many(token):
-    return token.tag_ in ["NNS", "NNPS"]
+    return token.tag_ in ["NNS", "NNPS"] and is_regular(token)
 
 def is_distinct(token):
     """Checks if a token is distinct, for example: Sam, Bob, Mary, etc."""
@@ -62,7 +62,7 @@ def create_var(input_string: str, seed = 0, x = 3):
 def ref(token, seed = 0, size=3):
     """Creates the variables that references a token."""
     if is_regular(token):
-        return create_var(token.text, seed, size)
+        return token.text[0] + create_var(token.text, seed, size-1)
     else:
         for child in token.children:
                 res = ref(child)
@@ -90,7 +90,7 @@ def _get_modifiers(token, reference):
     for child in token.children:
         if child.dep_ in ["amod", "advmod"]:
             other = _get_modifiers(child, reference)
-            mods.append(f"{child}({reference})")
+            mods.append(predicate(child.text, [reference]))
             if other:
                 mods.extend(other)
         elif child.dep_ == "conj":
@@ -107,9 +107,9 @@ def get_modifiers(token, reference=None):
         return res
     elif is_regular(token):
         res = _get_modifiers(token, ref(token))
-        res.append(f"{token}({ref(token)})")
+        res.append(predicate(token.text, [ref(token)]))
         if token.tag_ in ["NNPS", "NNS"]:
-            res.append(f"group({ref(token)})")
+            res.append(predicate("group", [ref(token)]))
         return res
     else:
         child = next((child for child in token.children), None)
@@ -132,17 +132,17 @@ def follow(token, text, reference=None):
         if is_distinct(child):
             other = follow(child, text, reference)
             if reference is not None:
-                found.append(f"{text}({reference}, {child})")
+                found.append(predicate(text.text, [reference, child]))
             else:
-                found.append(f"{text}({child})")
+                found.append(predicate(text.text, [child]))
             if other:
                 found.extend(other)
         elif is_regular(child) and child.pos_ not in ["ADJ", "ADV"]:
             other = follow(child, text, reference)
             if reference is not None:
-                found.append(f"{text}({reference}, {ref(child)})")
+                found.append(predicate(text.text, [reference, ref(child)]))
             else:
-                found.append(f"{text}({ref(child)})")
+                found.append(predicate(text.text, [ref(child)]))
             if other:
                 found.extend(other)
     return found
@@ -212,11 +212,21 @@ def _surround(token):
                 mods.extend(other)
     return mods
 
+def coordinate(input: list, operator="and", wrap=False) -> expression:
+    result = expression(input[0], wrap)
+    if len(input) == 1:
+        return result
+    else:
+        for exper in input[1:]:
+            result = expression((result, operator, exper), wrap)
+    return result
+
+
+
 def surround(wrap, obj):
     """Surrounds anything with it's modifiers"""
-    res = obj
     mods = []
-    mods.append(wrap)
+    res = predicate(wrap, [obj])
     for child in wrap.children:
         if child.dep_ in ["amod", "advmod"]:
             mods.append(child)
@@ -224,8 +234,7 @@ def surround(wrap, obj):
             if other:
                 mods.extend(_surround(child))
     for mod in mods:
-        res = f"{mod}({res})"
-    
+        res = predicate(mod.text, [res])
     return res
 
 def is_logical(token):
@@ -235,140 +244,166 @@ def is_logical(token):
 def snepslog(token):
     """Returns the snepslog representation of a token of a sentence."""
     match token.pos_:
-        
         case "VERB":
-            
             ref = ref_event(token)
-            res = []
-
-            after = []
+            ev_ref = predicate(ref, [create_var('thing')])
+            result = []
             before = []
-            mods = []
+            after = []
             vars = []
             
-            other = []
             neg = False
-            many = False 
+            nsubj_many = False
+            dobj_many = False
+
 
             for child in token.children:
+                if is_many(child) and child.dep_ in ["nsubj", "nsubjpass"]:
+                    nsubj_many = True
+                    ev_ref = predicate(ref, [create_var('thing')])
+                elif is_many(child) and child.dep_ in ["dobj", "agent"]:
+                    dobj_many = True
+                    ev_ref = predicate(ref, [create_var('thing', seed=1)])
+                if child.dep_ == "neg":
+                    neg = True
+
+            
+            for child in token.children:
                 match child.dep_:
-                    
                     case "nsubj" | "nsubjpass":
-                        
-                        if not is_many(child):
-                            res.append(f"agent({ref}, {group_set(child)})")
-                            if get_modifiers(child):
-                                    res.extend(get_modifiers(child))
+                    
+                        if not nsubj_many and not dobj_many:
+                            result.append(predicate("agent", [ref, group_set(child)]))
+                    
                         else:
-                            many = True
-                            before.append(f"member({create_var('something')}, {group_set(child)})")
-                            tmp = []
-                            tmp.append(f"{child.lemma_}({create_var('something')})")
-                            if conjs := list(child.conjuncts):
-                                for conj in conjs:
-                                    tmp.append(f"{conj.lemma_}({create_var('something')})")
-                            after.append(f"({' or '.join(tmp)})")
-                            vars.append(create_var('something'))
-                            if get_modifiers(child):
-                                    mods.extend(get_modifiers(child))
+                            coo = []
+                            if nsubj_many:
+                                
+                                before.append(predicate("member", [create_var('thing'), group_set(child)]))
+                                vars.append(create_var('thing'))
+                                
+                                coo.append(predicate(child.lemma_, [create_var('thing')]))
+                                if conjs := list(child.conjuncts):
+                                    for conj in conjs:
+                                        coo.append(predicate(conj.lemma_, [create_var('thing')]))
+                            
+                                after.append(coordinate(coo, "or", wrap=True))
+                                after.append(predicate("agent", [ev_ref, create_var('thing')]))
+
+                            else:
+                                coo.append(predicate("agent", [ev_ref, child.text]))
+                                if conjs := list(child.conjuncts):
+                                    for conj in conjs:
+                                        coo.append(predicate("agent", [ev_ref, conj.text]))
+                                after.append(coordinate(coo, "and", wrap=True))
+
+                        if mods := get_modifiers(child):
+                            result.extend(mods)
 
                     case "dobj" | "agent":
-
-                        res.append(f"object({ref}, {group_set(child)})")
-                        if get_modifiers(child):
-                                res.extend(get_modifiers(child))
-
-                    case "prep":
-                        if not is_many(child):
-
-                            #TODO: Find a way to deal with multi - preps
-                            # res = f"{res} & {child.text}({ref}, {group_set(child)})"
-
-                            if get_modifiers(child):
-                                    res.extend(get_modifiers(child, ref))
+                        
+                        if not nsubj_many and not dobj_many:
+                            result.append(predicate("object", [ref, group_set(child)]))
+                        
                         else:
-                            many = True
-                            tmp = f"{ref}({create_var('something')})"
-                            after.append(f"{get_modifiers(child, tmp)}")
+                            coo = []
+                            if dobj_many:
+                                before.append(predicate("member", [create_var('thing', seed=1), group_set(child)]))
+                                vars.append(create_var('thing', seed=1))
+
+                                coo.append(predicate(child.lemma_, [create_var('thing', seed=1)]))
+                                if conjs := list(child.conjuncts):
+                                    for conj in conjs:
+                                        coo.append(predicate(conj.lemma_, [create_var('thing', seed=1)]))
+
+                                after.append(coordinate(coo, "or", wrap=True))
+                                after.append(predicate("object", [ev_ref, create_var('thing', seed=1)]))
+
+                            else:
+                                coo.append(predicate("object", [ev_ref, child.text]))
+                                if conjs := list(child.conjuncts):
+                                    for conj in conjs:
+                                        coo.append(predicate("object", [ev_ref, conj.text]))
+
+                                after.append(coordinate(coo, "and", wrap=True))
+                            
+                        
+                        if mods := get_modifiers(child):
+                            result.extend(mods)
+
+                    
+                    case "prep":
+
+                        if not nsubj_many and not dobj_many:
+                            result.append(predicate(child.text, [ref, group_set(child)]))
+                        else:
+                            after.append(predicate(child.text, [predicate(ref, [create_var('thing')]), group_set(child)]))
+
+                        if mods := get_modifiers(child):
+                            result.extend(mods)
 
                     case "acomp":
                         
-                        res.append(f"acomp({ref}, {group_set(child)})")
-                        if get_modifiers(child):
-                                res.extend(get_modifiers(child, ref))
+                        result.append(predicate("acomp", [ref, group_set(child)]))
+                        
+                        if mods := get_modifiers(child):
+                            result.extend(mods)
 
                     case "amod" | "advmod":
                         
-                        res.append(f"{child}({ref})")
-                    
+                        if not nsubj_many and not dobj_many:
+                            result.append(predicate(child.text, [ref]))
+                        else:
+                            after.append(predicate(child.text, [ev_ref]))
+
                     case "dative":
-                    
-                        res.append(f"{child.text}({ref}, {group_set(child)})")
-                        if get_modifiers(child):
-                                res.extend(get_modifiers(child))
-                    
+                        result.append(predicate("dative", [ref, group_set(child)]))
+                        
+                        if mods := get_modifiers(child):
+                            result.extend(mods)
+
                     case "xcomp" | "ccomp":
-                    
-                        res.append(snepslog(child))
-                    
-                    case "neg":
-                        neg = True
+                        
+                        result.append(predicate("cause", [ref, ref_event(child)]))
+                        result.append(snepslog(child))
 
-            if not many:
-                res = [f"{token.text}({ref_event(token)})"] + res
-                return (' and '.join(res)) if not neg else negate(res)
+            if nsubj_many or dobj_many:
+                after.append(predicate(token.text, [ev_ref]))
+                exper_1 = expression((coordinate(before), '=>', coordinate(after).negate() if neg else coordinate(after)), wrap=True)
+                final = ForAll(vars, exper_1)
+                tmp = coordinate(result)
+                exper = expression((final, 'and', tmp))
+                return exper
             else:
-                mods.extend(res)
-                ev = f"{ref}({create_var('something')})"
-                ver = f"{token.text}({ev})"
-                ag = f"agent({ev}, {create_var('something')})"
-                after.extend([ev, ver, ag])
-                result = f"all({', '.join(vars)})({' and '.join(before)} => ({' and '.join(after)})) and {' and '.join(mods)}"
-                return result if not neg else negate(result)
+                result = [predicate(token.text, [ref])] + result
+                tmp = coordinate(result)
+                return (tmp.negate()) if neg else (tmp)
 
-            
         # the case if the root node is an AUX
         case "AUX":
-
-            res = []
-            other = []
-            neg=False
-            subj = None
-
             for child in token.children:
                 match child.dep_:
                     case "nsubj":
-                        subj = group_set(child)
-                        if get_modifiers(child):
-                            other.extend(get_modifiers(child))
+                        pass
                     case "acomp" if child.tag_ == "JJ":
-                        res.append(surround(child, subj))
+                        pass
                     case "acomp" if child.tag_ == "JJR":
-                        skip = next((child for child in child.children))
-                        res.append(f"{child}({subj}, {group_set(skip)})")
-                        if get_modifiers(skip):
-                            other.extend(get_modifiers(skip))
+                        pass
                     case "ccomp":
                         pass
                     case "attr":
-                        res = f"{surround(child, subj)}"
+                        pass
                     case "neg":
-                        neg = True
-            if neg:
-                pass
-            if other:
-                res.extend(other)
-            return ' and '.join(res)
-            
+                        pass
 
     # Default case: General processing & fallthrough from cases above that didn't return
-    children_to_process = [child for child in token.children if child.pos_ not in ["PUNCT", "SCONJ"]]
-    if children_to_process:
-        args = ", ".join([snepslog(child) for child in children_to_process])
-        return f"{token.lemma_}({args})"
-    else:
-        return token.lemma_
-
+    # children_to_process = [child for child in token.children if child.pos_ not in ["PUNCT", "SCONJ"]]
+    # if children_to_process:
+    #     args = [snepslog(child) for child in children_to_process]
+    #     return predicate(token.lemma_, args)
+    # else:
+    #     return predicate([token.text])
+            
 
 # Test sentences including linking constructions
 tests = [
@@ -376,12 +411,14 @@ tests = [
     # --- SUBJECT-VERB-OBJECT EXAMPLES --- #
     
     # "Flowers bloom in the garden",
+    # "boys hate apples",
     # "Sam surpasses Bob in height",
-    # "Sam feels that Bob likes tall Mary",
+    # "Sam feels that Bob doesn't like tall Mary",
     # "Sam feels happy and confident",
     # "Sam likes Mary",
     # "dancers feel happy",
     # "Singers perform songs",
+    # "dancers and singers do not move gracefully",
     # "dancers and singers move gracefully",
     # "A big dog barked",
     # "the tall boy and a small girl does not like a coffee",
@@ -390,6 +427,7 @@ tests = [
     # "The cat sleeps",
     # "Sam believes that Bob likes a girl",
     # "Sam built a small house",
+    # "Bob doesn't like cats",
     # "the tall sweet girl and nice Mary killed a small man",
     # "a man was killed by a police_member",
     # "a boy does not strongly believes a dog",
@@ -402,11 +440,11 @@ tests = [
     
     # --- AUX EXAMPLES --- #
 
-    # "John is happy",
+    # "John is not happy",
     # "John and Bob are happy",
     # "Bob and Sam are human",
     # "Sam and Jerry and Bob are friends",
-    # "Sam and Jerry and Bob are good friends",
+    # "Sam and Jerry and Bob are not good friends",
     # "the tall girl is cute",
     # "a tall girl is cute",
     # "the boy and the girl are tall",
@@ -434,4 +472,4 @@ tests = [
 for test in tests:
     doc = nlp(test)
     root = [token for token in doc if token.dep_ == "ROOT"][0]
-    print(test, " ➡ ", snepslog(root)+'.', "\n")
+    print(test, " ➡ ", str(snepslog(root)) + '.', "\n")
