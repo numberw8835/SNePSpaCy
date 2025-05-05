@@ -18,6 +18,7 @@ def is_distinct(token):
 def is_regular(token):
     """Checks if a token is a regular token, for example: dog, cat, run, etc."""
     return token.pos_ in ["NOUN", "VERB", "PRON", "ADJ", "ADV"]
+    # return token.pos_ in ["NOUN", "PRON"]
 
 def create_var(input_string: str, seed = 0, x = 3):
     """
@@ -178,26 +179,39 @@ def group_set(token):
     """returns a set of all the entities grouped together."""
     res = []
     conjs = list(token.conjuncts)
+    
     if conjs:
         
         if is_distinct(token):
+            
             res.append(str(token))
+
         elif is_regular(token):
+
             res.append(ref(token))
 
         for conj in conjs:
+            
             if is_distinct(conj):
+            
                 res.append(str(conj))
+            
             elif is_regular(conj):
+            
                 res.append(ref(conj))
 
         return f"{{{', '.join(res)}}}"
-    elif token.pos_ == "ADP":
+
+    elif token.pos_ in ["ADP"]:
+        
         child = next((child for child in token.children), None)
         return group_set(child)
+    
     else: 
+    
         if is_distinct(token):
             return token.text
+
         elif is_regular(token):
             return ref(token)
 
@@ -221,12 +235,20 @@ def coordinate(input: list, operator="and", wrap=False) -> expression:
             result = expression((result, operator, exper), wrap)
     return result
 
+def find_regular(token):
+    if is_regular(token):
+        return token
+    else:
+        for child in token.children:
+            res = find_regular(child)
+            if res:
+                return res
 
 
 def surround(wrap, obj):
     """Surrounds anything with it's modifiers"""
     mods = []
-    res = predicate(wrap, [obj])
+    res = predicate(wrap.text, [obj])
     for child in wrap.children:
         if child.dep_ in ["amod", "advmod"]:
             mods.append(child)
@@ -252,11 +274,14 @@ def snepslog(token):
             after = []
             vars = []
             
+            other = None
+            cc = None
+
             neg = False
             nsubj_many = False
             dobj_many = False
 
-
+            # Find which is the many and if there is a negation
             for child in token.children:
                 if is_many(child) and child.dep_ in ["nsubj", "nsubjpass"]:
                     nsubj_many = True
@@ -266,13 +291,17 @@ def snepslog(token):
                     ev_ref = predicate(ref, [create_var('thing', seed=1)])
                 if child.dep_ == "neg":
                     neg = True
-
+            
+            if nsubj_many and dobj_many:
+                tmp = predicate([create_var('thing', seed=1), create_var('thing')])
+                ev_ref = predicate(ref, [tmp])
             
             for child in token.children:
                 match child.dep_:
                     case "nsubj" | "nsubjpass":
                     
                         if not nsubj_many and not dobj_many:
+
                             result.append(predicate("agent", [ref, group_set(child)]))
                     
                         else:
@@ -303,6 +332,7 @@ def snepslog(token):
                     case "dobj" | "agent":
                         
                         if not nsubj_many and not dobj_many:
+                            
                             result.append(predicate("object", [ref, group_set(child)]))
                         
                         else:
@@ -364,45 +394,114 @@ def snepslog(token):
 
                     case "xcomp" | "ccomp":
                         
-                        result.append(predicate("cause", [ref, ref_event(child)]))
-                        result.append(snepslog(child))
+                        if child.pos_ == "VERB":
+                            result.append(predicate("cause", [ref, ref_event(child)]))
+                            result.append(snepslog(child))
+
+                        elif child.pos_ == "AUX":
+                            result.append(predicate("cause", [ref, snepslog(child)]))
+                    
+                    case "conj":
+
+                        other = snepslog(child)
+                    
+                    case "cc":
+
+                        cc = child
 
             if nsubj_many or dobj_many:
+
                 after.append(predicate(token.text, [ev_ref]))
-                exper_1 = expression((coordinate(before), '=>', coordinate(after).negate() if neg else coordinate(after)), wrap=True)
+                exper_1 = expression((coordinate(before), '=>', coordinate(after).negate() if neg else coordinate(after)))
                 final = ForAll(vars, exper_1)
                 tmp = coordinate(result)
-                exper = expression((final, 'and', tmp))
+                exper = expression((final, 'and' if not neg else 'or', tmp if not neg else tmp.negate()))
+
+                if other:
+                    exper = expression((exper, cc.text, other))
+
                 return exper
+            
             else:
+            
                 result = [predicate(token.text, [ref])] + result
                 tmp = coordinate(result)
-                return (tmp.negate()) if neg else (tmp)
+
+                res = (tmp.negate()) if neg else (tmp)
+
+                if other:
+                    res = expression((res, cc.text, other))
+
+                return res
 
         # the case if the root node is an AUX
         case "AUX":
+            result = []
+            other = None
+            cc = None
+            neg = False
+            subj = None
             for child in token.children:
                 match child.dep_:
                     case "nsubj":
-                        pass
+
+                        subj = group_set(child)
+
+                        if mods := get_modifiers(child):
+                            result.extend(mods)
+                     
                     case "acomp" if child.tag_ == "JJ":
-                        pass
+
+                        result.append(surround(child, subj))
+                        
                     case "acomp" if child.tag_ == "JJR":
-                        pass
+
+                        skip = next((child for child in child.children), None)
+                        obj = group_set(skip)
+                        result.append(predicate(child.text, [subj, obj]))
+
+                        if mods := get_modifiers(skip):
+                            result.extend(mods)
+
                     case "ccomp":
-                        pass
-                    case "attr":
-                        pass
+
+                        result.append(snepslog(child))
+
+                    case "attr" if child.lemma_.lower() != "member":
+                        
+                        result.append(surround(child, subj))
+
+                    case "attr" if child.lemma_.lower() == "member":
+                        
+                        result.append(predicate(child.text, [subj, 'c']))
+                        result.append(predicate("class", ['c']))
+                        
+                        before = predicate("member", [create_var('thing'), 'c'])
+                        skip = next((child for child in child.children if child.dep_ == "prep"), None)
+                        obj = find_regular(skip)
+                        after = predicate(obj.text, [create_var('thing')])
+                        result.append(ForAll([create_var('thing')], expression((before, '=>', after))))
+                    case "conj":
+                        other = snepslog(child)
+                    case "cc":
+                        cc = child
                     case "neg":
-                        pass
+
+                        neg = True
+            
+            result = coordinate(result)
+            if other:
+                result = expression((result, cc.text, other))
+            return (result.negate()) if neg else (result)
+
 
     # Default case: General processing & fallthrough from cases above that didn't return
-    # children_to_process = [child for child in token.children if child.pos_ not in ["PUNCT", "SCONJ"]]
-    # if children_to_process:
-    #     args = [snepslog(child) for child in children_to_process]
-    #     return predicate(token.lemma_, args)
-    # else:
-    #     return predicate([token.text])
+    children_to_process = [child for child in token.children if child.pos_ not in ["PUNCT", "SCONJ"]]
+    if children_to_process:
+        args = [snepslog(child) for child in children_to_process]
+        return predicate(token.lemma_, args)
+    else:
+        return predicate([token.text])
             
 
 # Test sentences including linking constructions
@@ -440,16 +539,21 @@ tests = [
     
     # --- AUX EXAMPLES --- #
 
+    # "John is happy",
     # "John is not happy",
     # "John and Bob are happy",
     # "Bob and Sam are human",
     # "Sam and Jerry and Bob are friends",
     # "Sam and Jerry and Bob are not good friends",
     # "the tall girl is cute",
+    # "the tall girl is not cute",
+    # "men are mortal",
+    # "Sam is mortal",
     # "a tall girl is cute",
     # "the boy and the girl are tall",
     # "Sam is taller than Bob and Jake",
     # "Sam is taller than a small boy",
+    # "long Sam is not taller than Bob",
     # "long Sam is not tall",
 
     # --- Given Examples --- #
@@ -465,6 +569,7 @@ tests = [
     # "Sam has the ability to run",
     # "Sam, Bob, and Jerry like a dog", # SpaCy decided to die on this one.
     # "Fido is a member of the class dog",
+    # "Fido and Joy are members of the class dog",
     # "Fido belongs to the class_dog.",
 ]
 

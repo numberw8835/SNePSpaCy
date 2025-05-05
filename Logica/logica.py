@@ -450,9 +450,9 @@ class ForAll:
         formula_str = str(self.formula)
         # Check if wrapping is needed for clarity
         if isinstance(self.formula, expression) and self.formula.is_binary:
-             formula_str = f"({formula_str})"
+             formula_str = f"{formula_str}"
         elif isinstance(self.formula, (ForAll, Exists)): # Also wrap nested quantifiers for visual clarity
-             formula_str = f"({formula_str})"
+             formula_str = f"{formula_str}"
         # Combine parts: all(vars)(formula)
         return f"all({vars_str})({formula_str})"
 
