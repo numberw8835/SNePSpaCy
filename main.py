@@ -313,6 +313,7 @@ def _snepslog(token, quant=False):
             dobj_many = False
             dative_many = False
             aux = False
+            past = False
 
             # Find which is the many and if there is a negation
             for child in token.children:
@@ -365,6 +366,7 @@ def _snepslog(token, quant=False):
                             before.extend(get_modifiers(child))
                             
                             if child.dep_ == "nsubjpass":
+                                past = True
                                 after.append(predicate("object", [ev_ref, group_set(child)]))
                             else:
                                 after.append(predicate("agent", [ev_ref, group_set(child)]))
@@ -372,6 +374,7 @@ def _snepslog(token, quant=False):
                         elif not nsubj_many and not dobj_many and not dative_many:
 
                             if child.dep_ == "nsubjpass":
+                                past = True
                                 result.append(predicate("object", [ref, group_set(child)]))
                             else:
                                 result.append(predicate("agent", [ref, group_set(child)]))
@@ -389,13 +392,26 @@ def _snepslog(token, quant=False):
                                         coo.append(predicate(conj.lemma_, [create_var('thing')]))
                             
                                 after.append(coordinate(coo, "or", wrap=True))
-                                after.append(predicate("agent", [ev_ref, create_var('thing')]))
+
+                                if child.dep_ == "nsubjpass":
+                                    past = True
+                                    after.append(predicate("object", [ev_ref, create_var('thing')]))
+                                else:
+                                    after.append(predicate("agent", [ev_ref, create_var('thing')]))
 
                             else:
-                                coo.append(predicate("agent", [ev_ref, child.text]))
+                                if child.dep_ == "nsubjpass":
+                                    past = True
+                                    coo.append(predicate("object", [ev_ref, child.text]))
+                                else:
+                                    coo.append(predicate("agent", [ev_ref, child.text]))
                                 if conjs := list(child.conjuncts):
                                     for conj in conjs:
-                                        coo.append(predicate("agent", [ev_ref, conj.text]))
+                                        if child.dep_ == "nsubjpass":
+                                            past = True
+                                            coo.append(predicate("object", [ev_ref, conj.text]))
+                                        else:
+                                            coo.append(predicate("agent", [ev_ref, conj.text]))
                                 after.append(coordinate(coo, "and", wrap=True))
 
                         if mods := get_modifiers(child):
@@ -437,13 +453,25 @@ def _snepslog(token, quant=False):
                                         coo.append(predicate(conj.lemma_, [create_var('thing', seed=1)]))
 
                                 after.append(coordinate(coo, "or", wrap=True))
-                                after.append(predicate("object", [ev_ref, create_var('thing', seed=1)]))
+                                if child.dep_ == "agent":
+                                    past = True
+                                    after.append(predicate("agent", [ev_ref, create_var('thing', seed=1)]))
+                                else:
+                                    after.append(predicate("object", [ev_ref, create_var('thing', seed=1)]))
 
                             else:
-                                coo.append(predicate("object", [ev_ref, child.text]))
+                                if child.dep_ == "agent":
+                                    past = True
+                                    coo.append(predicate("agent", [ev_ref, child.text]))
+                                else:
+                                    coo.append(predicate("object", [ev_ref, child.text]))
                                 if conjs := list(child.conjuncts):
                                     for conj in conjs:
-                                        coo.append(predicate("object", [ev_ref, conj.text]))
+                                        if child.dep_ == "agent":
+                                            past = True
+                                            coo.append(predicate("agent", [ev_ref, conj.text]))
+                                        else:
+                                            coo.append(predicate("object", [ev_ref, conj.text]))
 
                                 after.append(coordinate(coo, "and", wrap=True))
                             
@@ -559,7 +587,8 @@ def _snepslog(token, quant=False):
                         result.append(predicate("action", [ref, token.text]))
                         aux = True
             if quant:
-                
+                if past:
+                    after.append(predicate("cul", [ev_ref, "past"]))
                 after.append(predicate(token.text, [ev_ref]))
 
                 exper = expression((coordinate(before), '=>', coordinate(after)))
@@ -573,6 +602,9 @@ def _snepslog(token, quant=False):
 
             elif nsubj_many or dobj_many or dative_many:
 
+                if past:
+                    after.append(predicate("cul", [ev_ref, "past"]))
+
                 after.append(predicate(token.text, [ev_ref]))
                 exper_1 = expression((coordinate(before), '=>', coordinate(after).negate() if neg else coordinate(after)))
                 final = ForAll(vars, exper_1)
@@ -585,6 +617,10 @@ def _snepslog(token, quant=False):
                 return exper
             
             else:
+
+                if past:
+                    result.append(predicate("cul", [ref, "past"]))
+
                 if not aux:
                     result = [predicate(token.text, [ref])] + result
                 tmp = coordinate(result)
@@ -684,6 +720,9 @@ tests = [
     # "Flowers bloom in the garden",
     # "boys hate apples",
     # "Sam surpasses Bob in height",
+    
+    "the boy have been given a book by the girl",
+
     # "Sam feels that Bob doesn't like tall Mary",
     # "boys give books to girls",
     # "the boy feel happy",
@@ -704,7 +743,7 @@ tests = [
     # "Bob doesn't like cats",
     # "the tall sweet girl and nice Mary killed a small man",
     # "a man was killed by the police",
-    # "the rooms broke on the right"
+    # "the rooms broke on the right",
     # "a boy does not strongly believes a dog",
     # "Sam played with a boy",
     # "Sam loves a lovely girl",
