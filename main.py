@@ -8,8 +8,27 @@ def has_dep(token, dep):
     """Checks if a token has a child with a specific dependency."""
     return any(child.dep_ == dep for child in token.children)
 
+def get_dep(token, dep):
+    """Returns the first child with a specific dependency."""
+    return next((child for child in token.children if child.dep_ == dep), None)
+
+def check_quantifier(doc):
+    """Checks if a sentence has a quantifier."""
+    return any(token.text.lower() in ["all", "every", "forall", "any"] for token in doc)
+    
+def get_root(doc):
+    """Returns the root of the dependency tree."""
+    return next((token for token in doc if token.dep_ == "ROOT"), None)
+
 def is_many(token):
-    return token.tag_ in ["NNS", "NNPS"] and is_regular(token)
+    if is_regular(token):
+        return token.tag_ in ["NNS", "NNPS"]
+    else:
+        skip = next((child for child in token.children), None)
+        if skip:
+            return is_many(skip)
+        else:
+            return False
 
 def is_distinct(token):
     """Checks if a token is distinct, for example: Sam, Bob, Mary, etc."""
@@ -72,12 +91,19 @@ def ref(token, seed = 0, size=3):
 
 def get_refs(token, seed=0, size=3):
     refs = []
+    if token is None:
+        return refs
     if is_regular(token):
         conjs = list(token.conjuncts)
         if conjs:
             for conj in conjs:
                 refs.append(ref(conj, seed, size))
         refs.append(ref(token, seed, size))
+    else:
+        skip = next((child for child in token.children), None)
+        res = get_refs(skip, seed, size)
+        if res:
+            refs.extend(res)
     return refs
 
 
@@ -92,6 +118,11 @@ def _get_modifiers(token, reference):
         if child.dep_ in ["amod", "advmod"]:
             other = _get_modifiers(child, reference)
             mods.append(predicate(child.text, [reference]))
+            if other:
+                mods.extend(other)
+        elif child.dep_ in ["acl"]:
+            other = _get_modifiers(child, reference)
+            mods.append(predicate("concerns", [reference, child.text]))
             if other:
                 mods.extend(other)
         elif child.dep_ == "conj":
@@ -263,8 +294,8 @@ def is_logical(token):
     """Checks if a token is a logical conjunction."""
     return any(child.dep_ == "cc" for child in token.children)
 
-def snepslog(token):
-    """Returns the snepslog representation of a token of a sentence."""
+def _snepslog(token, quant=False):
+    """Returns the _snepslog representation of a token of a sentence."""
     match token.pos_:
         case "VERB":
             ref = ref_event(token)
@@ -280,29 +311,70 @@ def snepslog(token):
             neg = False
             nsubj_many = False
             dobj_many = False
+            dative_many = False
+            aux = False
 
             # Find which is the many and if there is a negation
             for child in token.children:
                 if is_many(child) and child.dep_ in ["nsubj", "nsubjpass"]:
+                    
                     nsubj_many = True
                     ev_ref = predicate(ref, [create_var('thing')])
+
                 elif is_many(child) and child.dep_ in ["dobj", "agent"]:
+
                     dobj_many = True
                     ev_ref = predicate(ref, [create_var('thing', seed=1)])
+
+                elif is_many(child) and child.dep_ == "dative":
+
+                    dative_many = True
+                    ev_ref = predicate(ref, [create_var('thing', seed=2)])
+
                 if child.dep_ == "neg":
                     neg = True
             
-            if nsubj_many and dobj_many:
+
+            if nsubj_many and dobj_many and dative_many:
+
+                tmp = predicate([create_var('thing', seed=1), create_var('thing'), create_var('thing', seed=2)])
+                ev_ref = predicate(ref, [tmp])
+            
+            elif nsubj_many and dobj_many:
+            
                 tmp = predicate([create_var('thing', seed=1), create_var('thing')])
                 ev_ref = predicate(ref, [tmp])
+            
+            elif quant:
+            
+                for child in token.children:
+                    match child.dep_:
+                        case "nsubj" | "dobj" | "dative" | "agent" | "nsubjpass" | "acomp":
+                            vars.extend(get_refs(child))
+
+                ev_ref = predicate(ref, [predicate(vars)])
+
+            
             
             for child in token.children:
                 match child.dep_:
                     case "nsubj" | "nsubjpass":
-                    
-                        if not nsubj_many and not dobj_many:
+                        
+                        if quant:
+                            
+                            before.extend(get_modifiers(child))
+                            
+                            if child.dep_ == "nsubjpass":
+                                after.append(predicate("object", [ev_ref, group_set(child)]))
+                            else:
+                                after.append(predicate("agent", [ev_ref, group_set(child)]))
 
-                            result.append(predicate("agent", [ref, group_set(child)]))
+                        elif not nsubj_many and not dobj_many and not dative_many:
+
+                            if child.dep_ == "nsubjpass":
+                                result.append(predicate("object", [ref, group_set(child)]))
+                            else:
+                                result.append(predicate("agent", [ref, group_set(child)]))
                     
                         else:
                             coo = []
@@ -331,9 +403,27 @@ def snepslog(token):
 
                     case "dobj" | "agent":
                         
-                        if not nsubj_many and not dobj_many:
+                        if quant:
                             
-                            result.append(predicate("object", [ref, group_set(child)]))
+                            before.extend(get_modifiers(child))
+
+                            if child.dep_ == "agent":
+                                after.append(predicate("agent", [ev_ref, group_set(child)]))
+                            else:
+                                after.append(predicate("object", [ev_ref, group_set(child)]))
+
+                            if mods := get_modifiers(child, reference=ev_ref):
+                                after.extend(mods)
+
+                        elif not nsubj_many and not dobj_many and not dative_many:
+                            
+                            if child.dep_ == "agent":
+                                result.append(predicate("agent", [ref, group_set(child)]))
+                            else:
+                                result.append(predicate("object", [ref, group_set(child)]))
+
+                            if mods := get_modifiers(child, reference=ref):
+                                result.extend(mods)
                         
                         else:
                             coo = []
@@ -358,13 +448,17 @@ def snepslog(token):
                                 after.append(coordinate(coo, "and", wrap=True))
                             
                         
-                        if mods := get_modifiers(child):
-                            result.extend(mods)
+                            if mods := get_modifiers(child, reference=ev_ref):
+                                result.extend(mods)
 
                     
                     case "prep":
+                        if quant:
 
-                        if not nsubj_many and not dobj_many:
+                            before.extend(get_modifiers(child))
+                            after.append(predicate(child.text, [ev_ref, group_set(child)]))
+
+                        elif not nsubj_many and not dobj_many:
                             result.append(predicate(child.text, [ref, group_set(child)]))
                         else:
                             after.append(predicate(child.text, [predicate(ref, [create_var('thing')]), group_set(child)]))
@@ -374,42 +468,110 @@ def snepslog(token):
 
                     case "acomp":
                         
-                        result.append(predicate("acomp", [ref, group_set(child)]))
+                        if quant:
+
+                            before.extend(get_modifiers(child))
+                            after.append(predicate("acomp", [ev_ref, group_set(child)]))
+
+                        else:
+
+                            result.append(predicate("acomp", [ref, group_set(child)]))
                         
                         if mods := get_modifiers(child):
                             result.extend(mods)
 
                     case "amod" | "advmod":
                         
-                        if not nsubj_many and not dobj_many:
+                        if quant:
+
+                            after.append(predicate(child.text, [ev_ref]))
+
+                        elif not nsubj_many and not dobj_many:
                             result.append(predicate(child.text, [ref]))
                         else:
                             after.append(predicate(child.text, [ev_ref]))
 
                     case "dative":
-                        result.append(predicate("dative", [ref, group_set(child)]))
+                        
+                        if quant:
+
+                            before.extend(get_modifiers(child))
+                            after.append(predicate("dative", [ev_ref, group_set(child)]))
+
+                        elif not nsubj_many and not dobj_many and not dative_many:
+                            result.append(predicate("dative", [ref, group_set(child)]))
+                        else:
+                            coo = []
+                            if dative_many:
+                                before.append(predicate("member", [create_var('thing', seed=2), group_set(child)]))
+                                vars.append(create_var('thing', seed=2))
+
+                                coo.append(predicate(child.lemma_, [create_var('thing', seed=2)]))
+                                if conjs := list(child.conjuncts):
+                                    for conj in conjs:
+                                        coo.append(predicate(conj.lemma_, [create_var('thing', seed=2)]))
+
+                                after.append(coordinate(coo, "or", wrap=True))
+                                after.append(predicate("dative", [ev_ref, create_var('thing', seed=2)]))
+
+                            else:
+                                coo.append(predicate("dative", [ev_ref, child.text]))
+                                if conjs := list(child.conjuncts):
+                                    for conj in conjs:
+                                        coo.append(predicate("dative", [ev_ref, conj.text]))
+
+                                after.append(coordinate(coo, "and", wrap=True))
                         
                         if mods := get_modifiers(child):
                             result.extend(mods)
 
                     case "xcomp" | "ccomp":
-                        
-                        if child.pos_ == "VERB":
-                            result.append(predicate("cause", [ref, ref_event(child)]))
-                            result.append(snepslog(child))
+                        if quant:
+                            if child.pos_ == "VERB":
 
-                        elif child.pos_ == "AUX":
-                            result.append(predicate("cause", [ref, snepslog(child)]))
+                                after.append(predicate("cause", [ref, ref_event(child, True)]))
+                                after.append(_snepslog(child, True))
+
+                            elif child.pos_ == "AUX":
+
+                                result.append(predicate("cause", [ref, _snepslog(child, True)]))
+                        else:
+                            if child.pos_ == "VERB":
+
+                                result.append(predicate("cause", [ref, ref_event(child)]))
+                                result.append(_snepslog(child))
+
+                            elif child.pos_ == "AUX":
+
+                                result.append(predicate("cause", [ref, _snepslog(child)]))
                     
                     case "conj":
 
-                        other = snepslog(child)
+                        other = _snepslog(child)
                     
                     case "cc":
 
                         cc = child
+                    
+                    case "aux" if child.tag_ == "MD":
 
-            if nsubj_many or dobj_many:
+                        result.append(predicate(child.text, [ref]))
+                        result.append(predicate("action", [ref, token.text]))
+                        aux = True
+            if quant:
+                
+                after.append(predicate(token.text, [ev_ref]))
+
+                exper = expression((coordinate(before), '=>', coordinate(after)))
+                
+                final = ForAll(vars, exper.negate() if neg else exper)
+
+                if other:
+                    final = expression((final, cc.text, other))
+                
+                return expression(final)
+
+            elif nsubj_many or dobj_many or dative_many:
 
                 after.append(predicate(token.text, [ev_ref]))
                 exper_1 = expression((coordinate(before), '=>', coordinate(after).negate() if neg else coordinate(after)))
@@ -423,8 +585,8 @@ def snepslog(token):
                 return exper
             
             else:
-            
-                result = [predicate(token.text, [ref])] + result
+                if not aux:
+                    result = [predicate(token.text, [ref])] + result
                 tmp = coordinate(result)
 
                 res = (tmp.negate()) if neg else (tmp)
@@ -462,10 +624,16 @@ def snepslog(token):
 
                         if mods := get_modifiers(skip):
                             result.extend(mods)
+                    case "prep":
+
+                        result.append(predicate(child.text, [subj, group_set(child)]))
+
+                        if mods := get_modifiers(child):
+                            result.extend(mods)
 
                     case "ccomp":
 
-                        result.append(snepslog(child))
+                        result.append(_snepslog(child))
 
                     case "attr" if child.lemma_.lower() != "member":
                         
@@ -482,7 +650,7 @@ def snepslog(token):
                         after = predicate(obj.text, [create_var('thing')])
                         result.append(ForAll([create_var('thing')], expression((before, '=>', after))))
                     case "conj":
-                        other = snepslog(child)
+                        other = _snepslog(child)
                     case "cc":
                         cc = child
                     case "neg":
@@ -498,11 +666,15 @@ def snepslog(token):
     # Default case: General processing & fallthrough from cases above that didn't return
     children_to_process = [child for child in token.children if child.pos_ not in ["PUNCT", "SCONJ"]]
     if children_to_process:
-        args = [snepslog(child) for child in children_to_process]
+        args = [_snepslog(child) for child in children_to_process]
         return predicate(token.lemma_, args)
     else:
         return predicate([token.text])
-            
+
+def snepslog(sentence):
+    doc = nlp(sentence)
+    return _snepslog(get_root(doc), check_quantifier(doc))
+
 
 # Test sentences including linking constructions
 tests = [
@@ -513,6 +685,8 @@ tests = [
     # "boys hate apples",
     # "Sam surpasses Bob in height",
     # "Sam feels that Bob doesn't like tall Mary",
+    # "boys give books to girls",
+    # "the boy feel happy",
     # "Sam feels happy and confident",
     # "Sam likes Mary",
     # "dancers feel happy",
@@ -520,6 +694,7 @@ tests = [
     # "dancers and singers do not move gracefully",
     # "dancers and singers move gracefully",
     # "A big dog barked",
+    # "sam killed a man for mary",
     # "the tall boy and a small girl does not like a coffee",
     # "John and Sam gave a book and a toy to a tall girl and tall Mary",
     # "the boy broke a window with a hammer at school",
@@ -528,11 +703,13 @@ tests = [
     # "Sam built a small house",
     # "Bob doesn't like cats",
     # "the tall sweet girl and nice Mary killed a small man",
-    # "a man was killed by a police_member",
+    # "a man was killed by the police",
+    # "the rooms broke on the right"
     # "a boy does not strongly believes a dog",
     # "Sam played with a boy",
     # "Sam loves a lovely girl",
     # "Sam gives a book to Mary",
+    # "the room is on the right"
     # "the fat man died",
     # "the boy loves to pet a dog",
     # "Sam laughed and Sara slept",
@@ -567,14 +744,19 @@ tests = [
 
     # "Sam is equal to Bob"
     # "Sam has the ability to run",
+    # "Sam can run",
+    # "Sam is able to run",
     # "Sam, Bob, and Jerry like a dog", # SpaCy decided to die on this one.
     # "Fido is a member of the class dog",
     # "Fido and Joy are members of the class dog",
     # "Fido belongs to the class_dog.",
+
+    # --- Quantifier Examples --- #
+    # "Every boy loves a dog",
+    # "Every adventurous young boy deeply cherishes a loyal companion dog."
+
 ]
 
 # Main part that runs the list of tests
 for test in tests:
-    doc = nlp(test)
-    root = [token for token in doc if token.dep_ == "ROOT"][0]
-    print(test, " ➡ ", str(snepslog(root)) + '.', "\n")
+    print(test, " ➡ ", str(snepslog(test)) + '.', "\n")
