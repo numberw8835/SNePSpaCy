@@ -32,7 +32,7 @@ def is_many(token):
 
 def is_distinct(token):
     """Checks if a token is distinct, for example: Sam, Bob, Mary, etc."""
-    return token.pos_ == "PROPN"
+    return token.pos_ in ["PROPN", "NUM"]
 
 def is_regular(token):
     """Checks if a token is a regular token, for example: dog, cat, run, etc."""
@@ -125,6 +125,11 @@ def _get_modifiers(token, reference):
             mods.append(predicate("concerns", [reference, child.text]))
             if other:
                 mods.extend(other)
+        elif child.dep_ in ["relcl"]:
+            other = _snepslog(child)
+            mods.append(predicate("concerns", [reference, child.text]))
+            if other:
+                mods.append(other)
         elif child.dep_ == "conj":
             other = get_modifiers(child)
             if other:
@@ -134,6 +139,8 @@ def _get_modifiers(token, reference):
 
 def get_modifiers(token, reference=None):
     """Returns a list of all the modifiers of the given token."""
+    if token is None:
+        return []
     if token.pos_ == "VERB" or is_distinct(token):
         res = _get_modifiers(token, token)
         return res
@@ -721,7 +728,11 @@ tests = [
     # "boys hate apples",
     # "Sam surpasses Bob in height",
     
-    "the boy have been given a book by the girl",
+    # "the boy have been given a book by the girl",
+
+    # "The boy is under the girl",
+    # "the bus is inside the building",
+    # "the dog is on the building",
 
     # "Sam feels that Bob doesn't like tall Mary",
     # "boys give books to girls",
@@ -749,7 +760,10 @@ tests = [
     # "Sam loves a lovely girl",
     # "Sam gives a book to Mary",
     # "the room is on the right"
+    # "Caesar was stabbed by Brutus"
     # "the fat man died",
+    # "John believes that Lucy is rich",
+    "The golfer who scored a 61, won the tournament.",
     # "the boy loves to pet a dog",
     # "Sam laughed and Sara slept",
     
