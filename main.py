@@ -180,11 +180,11 @@ def check_quantifier(token) -> bool:
 def _nested(token, ref, mod_text):
      m = []
      for child in token.children:
-         if child.dep_ in ["amod","advmod"]:
-             m.append(predicate(child.text, [ref, mod_text]))
-             m.extend(_nested(child, ref, child.lemma_))
-         else:
-             m.extend(_get_modifiers(child, ref))
+        if child.dep_ in ["amod","advmod"]:
+            m.append(predicate(child.text, [ref, mod_text]))
+            m.extend(_nested(child, ref, child.lemma_))
+        else:
+            m.extend(get_modifiers(child))
      return m
 
 def get_modifiers(token, reference=None, rel=True):
@@ -205,16 +205,17 @@ def get_modifiers(token, reference=None, rel=True):
         return res
     elif is_modifier(token):
         if reference:
-            res.append(predicate("content", [reference, ref(token)]))
+            res.append(predicate("content", [reference, predicate(group_set(token))]))
         res.append(predicate(token.lemma_, [ref(token)]))
         res.extend(_nested(token, ref(token), token.lemma_))
         return res
     else:
         skip = next((child for child in token.children), None)
-        res.extend(get_modifiers(skip))
-        if token.text.lower() not in ["than"]:
-            if reference:
-                res = [predicate(token.lemma_, [reference, predicate(group_set(skip))])] + res
+        if skip:
+            res.extend(get_modifiers(skip))
+            if token.text.lower() not in ["than"]:
+                if reference:
+                    res = [predicate(token.lemma_, [reference, predicate(group_set(skip))])] + res
         return res
 
 def group_set(token):
@@ -347,6 +348,8 @@ def _snepslog(token):
             if quants := get_quantifiers(token):
                 flags["all"] = True
                 info["vars"].extend([ref(quant) for quant in set(quants)])
+                info["event_content"].extend([ref(quant) for quant in set(quants)])
+
                 for child in token.children:
                     match child.dep_:
                         case "nsubj" | "nsubjpass":
@@ -402,7 +405,7 @@ def _snepslog(token):
 
                                 info["event_content"].append(create_var("thing", 3))
 
-            if flags["group"] and not flags["neg"]:
+            if (flags["group"] or flags["all"]) and (not flags["neg"]):
                 info["event"] = predicate(ref(token), [predicate(info["event_content"])])
             else:
                 info["event"] = predicate([ref(token)])
@@ -722,13 +725,11 @@ def _snepslog(token):
                                 info["antecedent"].append(predicate(quant.lemma_, [ref(quant)]))
                                 mods.extend(get_modifiers(quant, info["event"], False))
                             
-                            info["consequent"].append(predicate(child.text, [info["event"], predicate(group_set(child))]))
                             info["consequent"].extend(mods)
                         
                         elif flags["all"]:
                                 
                             info["antecedent"].extend([predicate(single.lemma_, [ref(single)]) for single in get_singles(child)])
-                            info["consequent"].append(predicate(child.text, [info["event"], predicate(group_set(child))]))
                             if mods := get_modifiers(child, info["event"], False):
                                 info["consequent"].extend(mods)
 
@@ -857,7 +858,7 @@ def _snepslog(token):
 
                         
             elif flags["group"]:
-
+                
                 info["consequent"].insert(0, predicate(token.lemma_, [info["event"]]))
                 exper = expression((coordinate(info["antecedent"]), "=>", coordinate(info["consequent"]) if not flags["neg"] else coordinate(info["consequent"]).negate()), True)
                 exper = ForAll(info["vars"], exper)
@@ -1014,14 +1015,16 @@ tests = [
     
     # "the boy have been given a book by the girl",
 
-    "The boy is under the girl",
-    "the bus is inside the building",
-    "the dog is on the building",
+    # "The boy is under the girl",
+    # "the bus is inside the building",
+    # "the dog is on the building",
 
     # "Sam feels that Bob likes tall Mary",
     # "boys give books to girls",
     # "the boy feel happy",
+    # "the boy feel very happy",
     # "Sam feels happy and confident",
+    # "Sam feels very happy and very confident",
     # "Sam likes Mary",
     # "dancers feel happy",
     # "the singers perform the songs",
