@@ -264,6 +264,18 @@ def get_groups(token):
         groups.extend(get_groups(child))
     return groups
 
+def get_nouns(token):
+    """Returns a list of all the nouns in the branch"""
+    nouns = []
+    if token is None:
+        return nouns
+    if (is_regular(token) or is_distinct(token)) and token.dep_ != "compound":
+        nouns.append(token)
+    for child in token.children:
+        nouns.extend(get_nouns(child))
+    return nouns
+
+
 def get_singles(token):
     singles = []
     if token is None:
@@ -946,12 +958,11 @@ def _snepslog(token):
                         info["result"].append(predicate(child.text, [info["main"], 'c']))
                         info["result"].append(predicate("class", ['c']))
                         
-                        info["consequent"] = predicate("member", [create_var('thing'), 'c'])
+                        info["antecedent"] = predicate("member", [create_var('thing'), 'c'])
                         skip = next((child for child in child.children if child.dep_ == "prep"), None)
-                        obj = predicate(group_set(skip))
-                        info["result"].extend(get_modifiers(skip))
-                        info["antecedent"] = predicate(obj, [create_var('thing')])
-                        info["result"].append(ForAll([create_var('thing')], expression((info["consequent"], '=>', info["antecedent"]))))
+                        obj = get_nouns(skip)[0]
+                        info["consequent"] = predicate(obj.text, [create_var('thing')])
+                        info["result"].append(ForAll([create_var('thing')], expression((info["antecedent"], '=>', info["consequent"]))))
 
                     case "conj":
                         logic["conj"] = child
@@ -1049,7 +1060,7 @@ tests = [
     # "John is not happy",
     # "John and Bob are happy",
     # "Bob and Sam are human",
-    "Sam and Jerry and Bob are friends",
+    # "Sam and Jerry and Bob are friends",
     # "Sam and Jerry and Bob are not good friends",
     # "the tall girl is cute",
     # "the tall girl is not cute",
@@ -1077,7 +1088,7 @@ tests = [
     # "Sam is able to run",
     # "Sam, Bob, and Jerry like a dog", # SpaCy decided to die on this one.
     # "Fido is a member of the class dog",
-    # "Fido and Joy are members of the class dog",
+    "Fido and Joy are members of the class dog",
     # "Fido belongs to the class_dog.",
 
     # --- Quantifier Examples --- #
