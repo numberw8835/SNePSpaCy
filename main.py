@@ -972,11 +972,11 @@ def _snepslog(token):
                         info["neg"] = True
 
             if info["all"]:
-                exper = expression((coordinate(info["antecedent"]), "=>", coordinate(info["consequent"])), True)
-                exper = ForAll(info["vars"], exper if not info["neg"] else exper.negate())
+                exper = expression((coordinate(info["antecedent"]), "=>", coordinate(info["consequent"])))
+                result = ForAll(info["vars"], exper if not info["neg"] else exper.negate())
                 if logic["conj"] and logic["cc"]:
-                    exper = expression( (exper, info["cc"], _snepslog(logic["conj"])), True)
-                return exper
+                    result = expression( (exper, info["cc"], _snepslog(logic["conj"])), True)
+                return result
             else:
                 exper = coordinate(info["result"])
                 if info["neg"]:
@@ -1005,6 +1005,7 @@ tests = [
     # --- SUBJECT-VERB-OBJECT EXAMPLES --- #
     
     # "Flowers bloom in the garden",
+    # "Flowers don't bloom in the garden",
     # "The tall flowers don't bloom in the gardens",
     # "the flowers and the plants grow in the garden",
     # "the flowers and the plants grow in the gardens",
@@ -1013,9 +1014,9 @@ tests = [
     
     # "the boy have been given a book by the girl",
 
-    # "The boy is under the girl",
-    # "the bus is inside the building",
-    # "the dog is on the building",
+    "The boy is under the girl",
+    "the bus is inside the building",
+    "the dog is on the building",
 
     # "Sam feels that Bob likes tall Mary",
     # "boys give books to girls",
@@ -1088,7 +1089,7 @@ tests = [
     # "Sam is able to run",
     # "Sam, Bob, and Jerry like a dog", # SpaCy decided to die on this one.
     # "Fido is a member of the class dog",
-    "Fido and Joy are members of the class dog",
+    # "Fido and Joy are members of the class dog",
     # "Fido belongs to the class_dog.",
 
     # --- Quantifier Examples --- #
@@ -1096,7 +1097,7 @@ tests = [
     # "Every adventurous young boy deeply cherishes a loyal companion dog.",
     # "every man become old",
     # "all men become old",
-    # "all men are mortal",
+    # "all men are not mortal",
 
     
     # --- Testing --- #

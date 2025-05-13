@@ -184,6 +184,20 @@ class expression:
         else:
             return hash(('invalid_expression_state', tuple(vars(self).items())))
 
+    def __getnewargs_ex__(self):
+        """
+        Provides arguments for __new__ to support deepcopy and pickle.
+        Returns ((expression_input_arg, wrap_arg), {kwargs_for_new}).
+        """
+        if self.is_atomic:
+            expression_input_val = self.operant_1
+        elif self.is_binary:
+            expression_input_val = (self.operant_1, self.operator, self.operant_2)
+        else:
+            # This case should ideally not be reached if the object is valid.
+            raise RuntimeError("Expression is in an invalid state (neither atomic nor binary) and cannot be deepcopied.")
+        return (expression_input_val, self.wrap), {}
+
 class ForAll:
     # Represents a universally quantified formula.
     def __init__(self, variable_names, formula):
