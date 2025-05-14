@@ -729,7 +729,6 @@ def _snepslog(token):
                         
                         elif flags["all"]:
                                 
-                            info["antecedent"].extend([predicate(single.lemma_, [ref(single)]) for single in get_singles(child)])
                             if mods := get_modifiers(child, info["event"], False):
                                 info["consequent"].extend(mods)
 
@@ -1006,10 +1005,11 @@ tests = [
     # --- SUBJECT-VERB-OBJECT EXAMPLES --- #
     
     # "Flowers bloom in the garden",
-    # "Flowers don't bloom in the garden",
+    "Flowers don't bloom in the garden",
+    "Flowers don't bloom in gardens",
     # "The tall flowers don't bloom in the gardens",
     # "the flowers and the plants grow in the garden",
-    # "the flowers and the plants grow in the gardens",
+    "the flowers and the plants grow in the gardens",
     # "boys hate apples",
     # "Sam surpasses Bob in height",
     
