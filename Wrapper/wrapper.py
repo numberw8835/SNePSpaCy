@@ -21,13 +21,25 @@ class sneps_api:
         self.process.sendline(f"{message}.")
         self.process.expect("CPU")
 
+    def list_wffs(self):
+        self.process.sendline("list-wffs")
+        self.process.expect("CPU")
+        answers = self.process.before.decode("utf-8").splitlines()
+        result = []
+        for ans in answers:
+            if ("wff" in ans) and ("!" in ans):
+                result.append(ans.strip())
+        return result
+
     def ask(self, message):
+        if message == "":
+            return []
         self.process.sendline(f"ask({message}).")
         self.process.expect("CPU")
         answers = self.process.before.decode("utf-8").splitlines()
         result = []
         for ans in answers:
-            if "wff" in ans:
+            if ("wff" in ans) and ("!" in ans):
                 result.append(ans.strip())
         return result
     
