@@ -1,5 +1,0 @@
-;; Simple backward chaining through a rule:
-clearkb
-man(socrates).
-all(x)(man(x) => mortal(x)).
-mortal(socrates)?

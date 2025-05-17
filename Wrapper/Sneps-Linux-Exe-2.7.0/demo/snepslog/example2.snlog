@@ -1,8 +1,0 @@
-resetnet
-
-expert
-
-all (x, y) ((x and y) => x) ?
-
-list-wffs
-

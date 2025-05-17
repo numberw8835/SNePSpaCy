@@ -1,1090 +1,165 @@
-import spacy
-import hashlib
-from Logica.logica import *
+import click
+import os 
+# Assuming semantic_parser.core.snepslog is in a location Python can find
+from semantic_parser.core import snepslog 
 
-nlp = spacy.load("en_core_web_trf")
+# Assuming sneps_wrapper.sneps_api refers to the sneps_api.py file
+from sneps_wrapper.sneps_api import sneps_api, SnepsApiError, SnepsSyntaxError
 
-def has_dep(token, dep):
-    """Checks if a token has a child with a specific dependency."""
-    return any(child.dep_ == dep for child in token.children)
+# For advanced terminal features
+from prompt_toolkit import PromptSession
+from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.key_binding import KeyBindings
+# We'll use the application's renderer directly for clearing.
 
-def get_dep(token, dep):
-    """Returns the first child with a specific dependency."""
-    return next((child for child in token.children if child.dep_ == dep), None)
-
-def get_root(doc):
-    """Returns the root of the dependency tree."""
-    return next((token for token in doc if token.dep_ == "ROOT"), None)
-
-def is_group(token) -> bool:
-    if is_regular(token):
-        return is_many(token) and (has_dep(token, "det") and get_dep(token, "det").text.lower() == "the")
-    else:
-        return False
-
-def is_not(token) -> bool:
-    """Checks if a token is a negation."""
-    return any(child.dep_ == "neg" for child in token.children)
-
-def is_many(token):
-    """Checks if a token is plural."""
-    return token.tag_ in ["NNS", "NNPS"]
-
-def is_distinct(token):
-    """Checks if a token is distinct, for example: Sam, Bob, Mary, etc."""
-    return token.pos_ in ["PROPN", "NUM"]
-
-def is_pron(token):    
-    """Checks if a token is a pronoun, for example: he, she, it, etc."""
-    return token.pos_ in ["PRON"]
-
-def is_num(token):
-    """Checks if a token is a number."""
-    return token.pos_ in ["NUM"]
-
-def is_regular(token):
-    """Checks if a token is a regular token, for example: dog, cat, run, etc."""
-    return token.pos_ in ["NOUN"]
-
-def is_action(token):
-    """Checks if a token is an action, for example: run, jump"""
-    return token.pos_ in ["VERB"]
-
-def is_modifier(token):
-    """Checks if a token is a modifier, for example: tall, big, small, etc."""
-    return token.pos_ in ["ADJ", "ADV"]
-
-def create_var(input_string: str, seed = 0, x = 3):
+@click.command()
+def console():
     """
-    Generates a hash of length x for a given string and seed.
-
-    Uses SHA-256 hashing combined with the seed, and then truncates the
-    hexadecimal output to the specified length x.
-
-    Note: If x is greater than the length of the SHA-256 hexdigest (64),
-    the function will return the full 64-character hexdigest.
-
-    Args:
-        input_string: The string to hash.
-        seed: A seed number to incorporate into the hash.
-        x: The desired length of the hash string.
-
-    Returns:
-        A string representing the hash of length x (or 64 if x > 64).
+    A command-line interface to interact with a SNePS knowledge base.
+    You can input natural language, which will be transcribed and asserted.
+    Alternatively, use specific commands:
+    - ask <query>: Query the knowledge base. E.g., ask member(Fido, Dog)
+    - list-wffs: List all well-formed formulas.
+    - clearkb: Clears the SNePS knowledge base.
+    - exit / quit / Ctrl+C / Ctrl+D: Terminate the console.
+    Use Up/Down arrows for command history. Ctrl+L to clear screen.
     """
-    # Combine the input string and the seed
-    combined_input = f"{input_string}-{seed}"
+    engine = None
+    try:
+        engine = snepslog() # Initialize the semantic parser engine
+    except Exception as e:
+        click.echo(f"[!!] Failed to initialize semantic parser engine: {e}")
+        return 
 
-    # Encode the combined input to bytes (required by hashlib)
-    encoded_input = combined_input.encode('utf-8')
-
-    # Create a SHA-256 hash object
-    hasher = hashlib.sha256()
-
-    # Update the hash object with the encoded input
-    hasher.update(encoded_input)
-
-    # Get the hexadecimal representation of the hash
-    hex_digest = hasher.hexdigest()
-
-    # Truncate the hash to the desired length x
-    # Ensure x does not exceed the maximum length of the hexdigest
-    truncated_hash = hex_digest[:min(x, len(hex_digest))]
-
-    return truncated_hash
-
-#TODO: Make the reference more precise to avoid duplications.
-def ref(token, seed = 0, size=3):
-    """Creates the variables that references a token."""
-    if token is None:
-        return "?" + create_var("", seed, size)
+    api = sneps_api(enable_logging=False) 
     
-    elif isinstance(token, str):
-        return token
-    
-    elif is_regular(token):
-        return token.text[0] + create_var(token.text, seed, size-1)
-    
-    elif is_distinct(token):
-        return token.text
-    
-    elif is_num(token):
-        return token.text
+    # Setup for advanced prompt
+    history = InMemoryHistory()
+    bindings = KeyBindings()
 
-    elif is_pron(token):
+    @bindings.add('c-l', eager=True) # eager=True helps process the binding quickly
+    def _(event):
+        """
+        Handle Ctrl+L to clear the screen and redraw the prompt.
+        """
+        # Clear the screen using prompt_toolkit's renderer
+        event.app.renderer.clear() 
         
-        return ref(token.head.head)
-    
-    elif is_action(token):
-        return 'e' + create_var(token.text, seed, size-1)
-    
-    elif is_modifier(token):
-        return 'm' + create_var(token.text, seed, size-1)
-    else:
-        for child in token.children:
-                res = ref(child)
-                if res:
-                    return res
+        # Reset the command line interface (this should help redraw the prompt)
+        if hasattr(event.app, 'cli') and event.app.cli is not None:
+            event.app.cli.reset()
+        
+        # Invalidate the screen to schedule a redraw
+        event.app.invalidate()
 
+    session = PromptSession(history=history, key_bindings=bindings)
 
-def find_conjuncts(token, operation=None):
-    if token is None:
-        return []
-    conjuncts = []
-    if conjs := list(token.conjuncts):
-        for conj in conjs:
-            if operation:
-                conjuncts.append(operation(conj))
-            else:
-                conjuncts.append(conj)
-    return conjuncts
+    try:
+        api.init()
+        click.echo("""
+╻  ┏━┓┏━╸╻┏━╸┏━┓
+┃  ┃ ┃┃╺┓┃┃  ┣━┫
+┗━╸┗━┛┗━┛╹┗━╸╹ ╹
+        """)
+        click.echo("SNePS console initialized. Type 'exit' or 'quit' to leave.")
+        click.echo("Commands: ask <query>, list-wffs, clearkb, or (Natural Language).")
+        click.echo("Use Up/Down for history, Ctrl+L to clear screen.\n") 
 
-def get_refs(token, seed=0, size=3):
-    refs = []
-    if token is None:
-        return refs
-    if is_regular(token):
-        refs.append(ref(token, seed, size))
-        if conjs := find_conjuncts(token, ref):
-            refs.extend(conjs)
-    else:
-        skip = next((child for child in token.children), None)
-        res = get_refs(skip, seed, size)
-        if res:
-            refs.extend(res)
-    return refs
+        while True:
+            try:
+                user_input = session.prompt("//: ") 
+            except KeyboardInterrupt: 
+                click.echo("\nExiting SNePS console (Ctrl+C)...") 
+                break 
+            except EOFError: 
+                click.echo("Exiting SNePS console (Ctrl+D)...")
+                break
 
-# Helper function for get_modifiers
-def _get_modifiers(token, reference, no_conj: bool=False):
-    mods = []
-    for child in token.children:
-        if child.dep_ in ["amod", "advmod", "compound"]:
-            mods.append(predicate(child.text, [reference]))
-            mods.extend(_nested(child, reference, child.lemma_))
-        elif child.dep_ in ["acl"]:
-            other = _get_modifiers(child, reference)
-            mods.append(predicate("content", [reference, child.lemma_]))
-            if other:
-                mods.extend(other)
-        elif child.dep_ in ["relcl"]:
-            other = _snepslog(child)
-            mods.append(predicate("concerns", [reference, other]))
-        elif child.dep_ == "conj":
-            if not no_conj:
-                mods.extend(get_modifiers(child, reference))
+            user_input_trimmed = user_input.strip()
+            user_input_lower = user_input_trimmed.lower()
+
+            if user_input_lower in ['exit', 'quit']:
+                click.echo("Exiting SNePS console...")
+                break 
             
-    return mods
+            elif user_input_lower == "clearkb":
+                try:
+                    if api.clear_kb():
+                        click.echo(f"\n\t<C> Knowledge base cleared.\n") 
+                    else:
+                        click.echo(f"\n\t<!> Failed to clear knowledge base (API returned false).\n")
+                except SnepsApiError as e:
+                    click.echo(f"\n\t<!> API Error during 'clearkb': {e}\n")
+                except Exception as e:
+                    click.echo(f"\n\t<!> Unexpected error during 'clearkb': {e}\n")
 
-def check_quantifier(token) -> bool:
-    """ Checks if the subtree has regular quantifiers"""
-    if token is None:
-        return False
-    if is_regular(token) or token.tag_ in ["NNS", "NNPS"]:
-        if (det := get_dep(token, "det")) and (det.text.lower() in ["all", "every", "forall", "any"]):
-            return True
-    else:
-        skip = next((child for child in token.children), None)
-        if skip:
-            return check_quantifier(skip)
-        else:
-            return False
+            elif user_input_lower.startswith("ask "):
+                query = user_input_trimmed[4:].strip() 
+                if query:
+                    try:
+                        answers = api.ask(query)
+                        if answers:
+                            for ans in answers:
+                                click.echo(f"\n\t<A> {ans}\n") 
+                        else:
+                            click.echo(f"\n\t<A> No answer found or query did not produce assertional wffs.\n")
+                    except SnepsSyntaxError as e: 
+                        click.echo(f"\n\t<!> Syntax Error: {e}\n")
+                    except SnepsApiError as e: 
+                        click.echo(f"\n\t<!> API Error: {e}\n")
+                    except Exception as e: 
+                        click.echo(f"\n\t<!> Unexpected error during 'ask': {e}\n")
+                else:
+                    click.echo(f"\n\t<!> 'ask' command requires a query. Example: ask member(Fido, Dog)\n")
 
-# handles nested advmods
-def _nested(token, ref, mod_text):
-     m = []
-     for child in token.children:
-        if child.dep_ in ["amod","advmod"]:
-            m.append(predicate(child.text, [ref, mod_text]))
-            m.extend(_nested(child, ref, child.lemma_))
-        else:
-            m.extend(get_modifiers(child))
-     return m
-
-def get_modifiers(token, reference=None, rel=True, var=None, neg: bool=False, no_conj: bool=False):
-    """Returns a list of all the modifiers of the given token."""
-    res = []
-    if token is None:
-        return res
-    elif is_distinct(token):
-        res.extend(_get_modifiers(token, ref(token), no_conj=no_conj))
-        return res
-    elif is_regular(token):
-        if var:
-            if rel:
-                res.append(predicate(token.lemma_, [var]))
-            res.extend(_get_modifiers(token, var, no_conj=no_conj))
-        else:
-            if rel:
-                res.append(predicate(token.lemma_, [ref(token)]))
-            res.extend(_get_modifiers(token, ref(token), no_conj=no_conj))
-        return res
-    elif is_action(token):
-        res.extend(_get_modifiers(token, ref(token)))
-        return res
-    elif is_modifier(token):
-        if reference:
-            res.append(predicate("content", [reference, predicate(group_set(token))]))
-        res.append(predicate(token.lemma_, [ref(token)]))
-        res.extend(_nested(token, ref(token), token.lemma_))
-        return res
-    else:
-        skip = next((child for child in token.children), None)
-        if skip:
-            res.extend(get_modifiers(skip, reference, rel, var, neg))
-            if token.text.lower() not in ["than"]:
-                if reference:
-                    res = [correct_group(token.lemma_, neg, reference, get_nouns(skip))] + res
-        return res
-
-def group_set(token):
-    """returns a set of all the entities grouped together."""
-    res = []
-    if token is None:
-        return res
-    if token.conjuncts:
-        res.extend(find_conjuncts(token, ref))
-    elif token.pos_ == "ADP":
-        skip = skip = next((child for child in token.children), None)
-        if skip:
-            return group_set(skip)
-    res.append(ref(token))
-    return res
-
-def correct_group(pred: str, neg: bool, refer: str, nouns: list) -> expression:
-    if not nouns:
-        return None   
-    lads = []
-    for noun in nouns:
-        lads.append(predicate(pred, [refer, ref(noun)]))
-    if neg:
-        return coordinate(lads, 'or', wrap=True)
-    else:
-        return expression(predicate(pred, [refer, predicate([ref(n) for n in nouns])]))
-    
-def coordinate(input: list, operator="and", wrap=False) -> expression:
-    if not input:
-        return None
-    elif len(input) == 1:
-        return expression(input[0])
-    else:
-        res = input[0]
-        for pred in input[1:]:
-            res = expression((res, operator, pred), wrap=wrap)
-        return res
-
-def get_quantifiers(token):
-    quants = []
-    if token is None:
-        return quants
-    if (token.dep_ in ["det", "predet"]) and (token.text.lower() in ["all", "every", "forall", "any"]):
-        quants.append(token.head)
-    elif is_many(token) and not is_group(token) and token.dep_ not in  ["attr", "acomp"]:
-        quants.append(token)
-    for child in token.children:
-        quants.extend(get_quantifiers(child))
-    return quants
-
-def get_groups(token):
-    groups = []
-    if token is None:
-        return groups
-    if is_group(token):
-        groups.append(token)
-    for child in token.children:
-        groups.extend(get_groups(child))
-    return groups
-
-def get_nouns(token):
-    """Returns a list of all the nouns in the branch"""
-    nouns = []
-    if token is None:
-        return nouns
-    if (is_regular(token) or is_distinct(token)) and (token.dep_ != "compound"):
-        nouns.append(token)
-    for child in token.children:
-        nouns.extend(get_nouns(child))
-    return nouns
-
-def get_singles(token):
-    singles = []
-    if token is None:
-        return singles
-    if (not is_group(token)) and (is_regular(token)) and token.dep_ != "compound":
-        singles.append(token)
-    for child in token.children:
-        singles.extend(get_singles(child))
-    return singles
-
-def surroundV2(wrap, obj):
-    res = []
-    res.append(predicate(wrap.lemma_, [obj]))
-    res.extend(_nested(wrap, obj, wrap.lemma_))
-    return res
-
-def is_logical(token):
-    """Checks if a token is a logical conjunction."""
-    return has_dep(token, "cc")
-
-def _snepslog(token):
-    """Returns the _snepslog representation of a token of a sentence."""
-    match token.pos_:
-        case "VERB":
-
-            info = {
-                "event": None,
-                "result": [],
-                "vars": [],
-                "antecedent": [],
-                "consequent": [],
-                "event_content": []
-            }
-
-            logic = {
-                "num": 0,
-                "conj": None,
-                "cc": None,
-            }
-
-            flags = {
-                "neg": False,
-                "all": False,
-                "group": False,
-                "past": False,
-                "future": False,
-            }
-
-            all_flags = {
-                "nsubj": False,
-                "dobj": False,
-                "nsubjpass": False,
-                "agent": False,
-                "prep": False,
-                "dative": False,
-            }
-            group_flags = {
-                "nsubj": False,
-                "dobj": False,
-                "nsubjpass": False,
-                "agent": False,
-                "prep": False,
-                "dative": False,
-            }
+            elif user_input_lower == "list-wffs" or user_input_lower == "list wffs":
+                try:
+                    wffs = api.list_wffs()
+                    if wffs:
+                        for wff in wffs:
+                            click.echo(f"\n\t<L> {wff}\n") 
+                    else:
+                        click.echo(f"\n\t<L> No wffs found in the knowledge base.\n") 
+                except SnepsApiError as e:
+                    click.echo(f"\n\t<!> API Error during 'list-wffs': {e}\n")
+                except Exception as e:
+                    click.echo(f"\n\t<!> Unexpected error during 'list-wffs': {e}\n")
             
-            info["event"] = predicate([ref(token)])
+            elif not user_input_trimmed: 
+                continue
 
-            if is_not(token):
-                flags["neg"] = True
-                info["vars"].append(ref(token))
-
-            if quants := get_quantifiers(token):
-                flags["all"] = True
-                info["vars"].extend([ref(quant) for quant in set(quants)])
-                info["event_content"].extend([ref(quant) for quant in set(quants)])
-
-                for child in token.children:
-                    match child.dep_:
-                        case "nsubj":
-                            if get_quantifiers(child):
-                                all_flags["nsubj"] = True
-
-                        case "nsubjpass":
-                            if get_quantifiers(child):
-                                all_flags["nsubjpass"] = True
-                        
-                        case "dobj":
-                            if get_quantifiers(child):
-                                all_flags["dobj"] = True
-
-                        case "agent":
-                            if get_quantifiers(child):
-                                all_flags["agent"] = True
-
-                        case "dative":
-                            if get_quantifiers(child):
-                                all_flags["dative"] = True
-
-                        case "prep":
-                            if get_quantifiers(child):
-                                all_flags["prep"] = True
-                            
-            if groups := get_groups(token):
-                flags["group"] = True
-                for group in groups:
-                    info["vars"].append(create_var('thing', seed=logic["num"]))
-                    info["event_content"].append(create_var("thing", seed=logic["num"]))
-                    logic["num"] += 1
-
-                for child in token.children:
-                    match child.dep_:
-                        case "nsubj":
-                            if get_groups(child):
-                                group_flags["nsubj"] = True
-
-                        case "nsubjpass":
-                            if get_groups(child):
-                                group_flags["nsubjpass"] = True
-                        
-                        case "dobj":
-                            if get_groups(child):
-                                group_flags["dobj"] = True
-                        
-                        case "agent":
-                            if get_groups(child):
-                                group_flags["agent"] = True
-
-                        case "dative":
-                            if get_groups(child):
-                                group_flags["dative"] = True
-
-                        case "prep":
-                            if get_groups(child):
-                                group_flags["prep"] = True
-                logic["num"] = 0
-            
-            if (flags["group"] or flags["all"]) and (not flags["neg"]):
-                info["event"] = predicate(ref(token), [predicate(info["event_content"])])
-
-            for child in token.children:
-                match child.dep_:
-
-                    ######################### NSUBJ ######################### 
-                    case "nsubj":
-                        
-                        if all_flags["nsubj"]: ###   ALL   ###
-
-                            mods = []
-                            for quant in set(get_quantifiers(child)):
-
-                                info["antecedent"].append(predicate(quant.lemma_, [ref(quant)]))
-                                mods.extend(get_modifiers(quant, info["event"], False))
-                            
-                            info["consequent"].append(correct_group("agent", flags["neg"], info["event"], get_nouns(child)))
-                            info["consequent"].extend(mods)
-                        
-                        elif flags["all"]:
-
-                            info["consequent"].extend([predicate(elem.lemma_, [ref(elem)]) for elem in set(get_singles(child))])
-                            info["consequent"].append(correct_group("agent", flags["neg"], info["event"], get_nouns(child)))
-                            if mods := get_modifiers(child, info["event"], False):
-                                info["consequent"].extend(mods)
-
-                        elif group_flags["nsubj"]: ###   GROUP   ###
-
-                            vars = []
-                            for group in get_groups(child):
-                                
-                                member = predicate("member", [create_var('thing', seed=logic["num"]), ref(group)])
-                                mem_mod = get_modifiers(group, var=create_var('thing', seed=logic["num"]), neg=flags["neg"], no_conj=True)
-                                info["result"].append(ForAll([create_var('thing', logic["num"])], expression((member, "<=>", coordinate(mem_mod)))))
-                                info["antecedent"].append(member)
-                                vars.append(create_var('thing', seed=logic["num"]))
-                                logic["num"] += 1
-                            
-                            info["consequent"].append(correct_group("agent", flags["neg"], info["event"], vars))
-
-                        elif flags["group"]:
-
-                            info["consequent"].append(correct_group("agent", flags["neg"], info["event"], get_nouns(child)))
-                            if mods := get_modifiers(child, info["event"], neg=flags["neg"]):
-                                info["consequent"].extend(mods)
-                            
-                        else: ###   NORMAL   ###
-
-                            info["result"].append(correct_group("agent", flags["neg"], info["event"], get_nouns(child)))
-                            if mods := get_modifiers(child, info["event"], neg=flags["neg"]):
-                                info["result"].extend(mods)
-
-
-                    ######################### DOBJ ######################### 
-                    case "dobj":
-
-                        if all_flags["dobj"]: ###   ALL   ###
-
-                            mods = []
-                            for quant in set(get_quantifiers(child)):
-                                info["antecedent"].append(predicate(quant.lemma_, [ref(quant)]))
-                                mods.extend(get_modifiers(quant, info["event"], False))
-                            
-                            info["consequent"].append(correct_group("object", flags["neg"], info["event"], get_nouns(child)))
-                            info["consequent"].extend(mods)
-                        
-                        elif flags["all"]:
-
-                            info["consequent"].extend([predicate(single.lemma_, [ref(single)]) for single in get_singles(child)])
-                            info["consequent"].append(correct_group("object", flags["neg"], info["event"], get_nouns(child)))
-                            if mods := get_modifiers(child, info["event"], False):
-                                info["consequent"].extend(mods)
-
-                        elif group_flags["dobj"]:
-
-                            vars = []
-                            for group in get_groups(child):
-                                
-                                member = predicate("member", [create_var('thing', seed=logic["num"]), ref(group)])
-                                mem_mod = get_modifiers(group, var=create_var('thing', seed=logic["num"]), neg=flags["neg"], no_conj=True)
-                                info["result"].append(ForAll([create_var('thing', logic["num"])], expression((member, "<=>", coordinate(mem_mod)))))
-                                info["antecedent"].append(member)
-                                vars.append(create_var('thing', seed=logic["num"]))
-                                logic["num"] += 1
-                            
-                            info["consequent"].append(correct_group("object", flags["neg"], info["event"], vars))
-
-                        elif flags["group"]:
-
-                            info["consequent"].append(correct_group("object", flags["neg"], info["event"], get_nouns(child)))
-                            if mods := get_modifiers(child, info["event"], neg=flags["neg"]):
-                                info["consequent"].extend(mods)
-
-                        else:
-
-                            info["result"].append(correct_group("object", flags["neg"], info["event"], get_nouns(child)))
-                            if mods := get_modifiers(child, info["event"]):
-                                info["result"].extend(mods)
+            else: # Default to inform (SNePS expressions directly)
+                try:
+                    #TODO: Change it to use engine again
+                    results_str = user_input_trimmed 
                     
-                    ######################### NSUBJPASS ######################### 
-                    case "nsubjpass":
-
-                        flags["past"] = True
-
-                        if all_flags["nsubjpass"]: ###   ALL   ###
-                         
-                            mods = []
-                            for quant in set(get_quantifiers(child)):
-                                info["antecedent"].append(predicate(quant.lemma_, [ref(quant)]))
-                                mods.extend(get_modifiers(quant, info["event"], False))
-                            
-                            info["consequent"].append(correct_group("object_past", flags["neg"], info["event"], get_nouns(child)))
-                            info["consequent"].extend(mods)
-                        
-                        elif flags["all"]:
-
-                            info["consequent"].extend([predicate(single.lemma_, [ref(single)]) for single in get_singles(child)])
-                            info["consequent"].append(correct_group("object_past", flags["neg"], info["event"], get_nouns(child)))
-                            if mods := get_modifiers(child, info["event"], False):
-                                info["consequent"].extend(mods)
-
-                        elif group_flags["nsubjpass"]:
-
-                            vars = []
-                            for group in get_groups(child):
-                                
-                                member = predicate("member", [create_var('thing', seed=logic["num"]), ref(group)])
-                                mem_mod = get_modifiers(group, var=create_var('thing', seed=logic["num"]), neg=flags["neg"], no_conj=True)
-                                info["result"].append(ForAll([create_var('thing', logic["num"])], expression((member, "<=>", coordinate(mem_mod)))))
-                                info["antecedent"].append(member)
-                                vars.append(create_var('thing', seed=logic["num"]))
-                                logic["num"] += 1
-                            
-                            info["consequent"].append(correct_group("object_past", flags["neg"], info["event"], vars))
-
-                        elif flags["group"]:
-
-                            info["consequent"].append(correct_group("object_past", flags["neg"], info["event"], get_nouns(child)))
-                            if mods := get_modifiers(child, info["event"], neg=flags["neg"]):
-                                info["consequent"].extend(mods)
-
-                        else:
-
-                            info["result"].append(correct_group("object_past", flags["neg"], info["event"], get_nouns(child)))
-                            if mods := get_modifiers(child, info["event"]):
-                                info["result"].extend(mods)
+                    if not results_str: 
+                        click.echo("<?> Input is empty.") 
+                        continue
                     
-                    ######################### AGENT ######################### 
-                    case "agent":
-                        flags["past"] = True
-
-                        if all_flags["agent"]: ###   ALL   ###
-
-                            mods = []
-                            for quant in set(get_quantifiers(child)):
-                                info["antecedent"].append(predicate(quant.lemma_, [ref(quant)]))
-                                mods.extend(get_modifiers(quant, info["event"], False))
-                            
-                            info["consequent"].append(correct_group("agent_past", flags["neg"], info["event"], get_nouns(child)))
-                            info["consequent"].extend(mods)
-
-                        
-                        elif flags["all"]:
-
-                            info["consequent"].extend([predicate(single.lemma_, [ref(single)]) for single in get_singles(child)])
-                            info["consequent"].append(correct_group("agent_past", flags["neg"], info["event"], get_nouns(child)))
-                            if mods := get_modifiers(child, info["event"], False):
-                                info["consequent"].extend(mods)
-
-                        
-                        elif group_flags["agent"]:
-
-                            vars = []
-                            for group in get_groups(child):
-                                
-                                member = predicate("member", [create_var('thing', seed=logic["num"]), ref(group)])
-                                mem_mod = get_modifiers(group, var=create_var('thing', seed=logic["num"]), neg=flags["neg"], no_conj=True)
-                                info["result"].append(ForAll([create_var('thing', logic["num"])], expression((member, "<=>", coordinate(mem_mod)))))
-                                info["antecedent"].append(member)
-                                vars.append(create_var('thing', seed=logic["num"]))
-                                logic["num"] += 1
-                            
-                            info["consequent"].append(correct_group("agent_past", flags["neg"], info["event"], vars))
-                        
-                        elif flags["group"]:
-
-                            info["consequent"].append(correct_group("agent_past", flags["neg"], info["event"], get_nouns(child)))
-                            if mods := get_modifiers(child, info["event"], neg=flags["neg"]):
-                                info["consequent"].extend(mods)
-                            
-                        else:
-                            
-                            info["result"].append(correct_group("agent_past", flags["neg"], info["event"], get_nouns(child)))
-                            if mods := get_modifiers(child, info["event"], neg=flags["neg"]):
-                                info["result"].extend(mods)
-
-                    ######################### DATIVE ######################### 
-                    case "dative":
-
-                        if all_flags["dative"]: ###   ALL   ###
-                            
-                            mods = []
-                            for quant in set(get_quantifiers(child)):
-                                info["antecedent"].append(predicate(quant.lemma_, [ref(quant)]))
-                                mods.extend(get_modifiers(quant, info["event"], False))
-                            
-                            info["consequent"].append(correct_group("recipient", flags["neg"], info["event"], get_nouns(child)))
-                            info["consequent"].extend(mods)
-                        
-                        elif flags["all"]:
-                                
-                            info["consequent"].extend([predicate(single.lemma_, [ref(single)]) for single in get_singles(child)])
-                            info["consequent"].append(correct_group("recipient", flags["neg"], info["event"], get_nouns(child)))
-                            if mods := get_modifiers(child, info["event"], False):
-                                info["consequent"].extend(mods)
-                        
-                        elif group_flags["dative"]:
-
-                            vars = []
-                            for group in get_groups(child):
-                                
-                                member = predicate("member", [create_var('thing', seed=logic["num"]), ref(group)])
-                                mem_mod = get_modifiers(group, var=create_var('thing', seed=logic["num"]), neg=flags["neg"], no_conj=True)
-                                info["result"].append(ForAll([create_var('thing', logic["num"])], expression((member, "<=>", coordinate(mem_mod)))))
-                                info["antecedent"].append(member)
-                                vars.append(create_var('thing', seed=logic["num"]))
-                                logic["num"] += 1
-                            
-                            info["consequent"].append(correct_group("recipient", flags["neg"], info["event"], vars))
-
-                        elif flags["group"]:
-
-                            info["consequent"].append(correct_group("recipient", flags["neg"], info["event"], get_nouns(child)))
-                            if mods := get_modifiers(child, info["event"], neg=flags["neg"]):
-                                info["consequent"].extend(mods)
-
-                        else:
-
-                            info["result"].append(correct_group("recipient", flags["neg"], info["event"], get_nouns(child)))
-                            if mods := get_modifiers(child, info["event"], neg=flags["neg"]):
-                                info["result"].extend(mods)
-
-                    ######################### PREP ######################### 
-                    case "prep":
-
-                        if all_flags["prep"]: ###   ALL   ###
-                            
-                            mods = []
-                            for quant in set(get_quantifiers(child)):
-                                info["antecedent"].append(predicate(quant.lemma_, [ref(quant)]))
-                            
-                            mods.extend(get_modifiers(child, info["event"], rel=False, neg=flags["neg"]))
-                            info["consequent"].extend(mods)
-
-                        
-                        elif flags["all"]:
-                                
-                            if mods := get_modifiers(child, info["event"], neg=flags["neg"]):
-                                info["consequent"].extend(mods)
-
-                        elif group_flags["prep"]:
-
-                            vars = []
-                            for group in get_groups(child):
-                                
-                                member = predicate("member", [create_var('thing', seed=logic["num"]), ref(group)])
-                                mem_mod = get_modifiers(group, var=create_var('thing', seed=logic["num"]), neg=flags["neg"], no_conj=True)
-                                info["result"].append(ForAll([create_var('thing', logic["num"])], expression((member, "<=>", coordinate(mem_mod)))))
-                                info["antecedent"].append(member)
-                                vars.append(create_var('thing', seed=logic["num"]))
-                                logic["num"] += 1
-                            
-                            info["consequent"].append(correct_group(child.text, flags["neg"], info["event"], vars))
-
-                        elif flags["group"]:
-
-                            if mods := get_modifiers(child, info["event"], neg=flags["neg"]):
-                                info["consequent"].extend(mods)
-                        else:
-
-                            if mods := get_modifiers(child, info["event"], neg=flags["neg"]):
-                                info["result"].extend(mods)
-
-                    ######################### CCOMP ######################### 
-                    case "ccomp":
-
-                        if flags["all"] or flags["group"]:
-
-                            main = _snepslog(child)
-                            info["consequent"].append(predicate('concerns', [info["event"], main]))
-
-                        else:
-                            main = _snepslog(child)
-                            info["result"].append(predicate('concerns', [info["event"], main]))
-
-                    ######################### ACOMP ######################### 
-                    case "acomp":
-
-                        if flags["all"] or flags["group"]:
-
-                            if mods := get_modifiers(child, info["event"]):
-                                info["consequent"].extend(mods)
-
-                        else:
-                            if mods := get_modifiers(child, info["event"]):
-                                info["result"].extend(mods)
-
-                    ######################### XCOMP ######################### 
-                    case "xcomp":
-
-                        if flags["all"] or flags["group"]:
-
-                            main = _snepslog(child)
-                            info["consequent"].append(predicate('concerns', [info["event"], main]))
-
-                        else:
-                            main = _snepslog(child)
-                            info["result"].append(predicate('concerns', [info["event"], main]))
-
-                    ######################### AMOD ######################### 
-                    case "amod":
-
-                        if flags["all"] or flags["group"]:
-                            info["consequent"].extend(get_modifiers(token))
-                        else:
-                            info["result"].extend(get_modifiers(token))
-
-                    ######################### ADVMOD ######################### 
-                    case "advmod":
-
-                        if flags["all"] or flags["group"]:
-                            info["consequent"].extend(get_modifiers(token))
-                        else:
-                            info["result"].extend(get_modifiers(token))
-
-                    ######################### AUX ######################### 
-                    case "aux":
-                        if child.text.lower() == "will":
-                            flags["future"] = True
-
-                    ######################### ADVCL ######################### 
-                    case "advcl":
-
-                        if flags["all"] or flags["group"]:
-                            main = _snepslog(child)
-                            info["consequent"].append(predicate('cause', [info["event"], main]))
-                        else:
-                            main = _snepslog(child)
-                            info["result"].append(predicate('cause', [info["event"], main]))
-                    
-                    ######################### CONJ ######################### 
-                    case "conj":
-
-                        logic["conj"] = child
-
-                    ######################### CC ######################### 
-                    case "cc":
-
-                        logic["cc"] = child.text
-
-            if flags["all"]:
-
-                info["consequent"].insert(0, predicate(token.lemma_, [info["event"]]))
-                exper = expression((coordinate(info["antecedent"]), "=>", coordinate(info["consequent"]) if not flags["neg"] else coordinate(info["consequent"]).negate()), True)
-                exper = ForAll(info["vars"], exper)
-                if logic["conj"] and logic["cc"]:
-                    exper = expression( (exper, logic["cc"], _snepslog(logic["conj"])), True)
-                return exper
-                        
-            elif flags["group"]:
-                
-                info["consequent"].insert(0, predicate(token.lemma_, [info["event"]]))
-                exper = expression((coordinate(info["antecedent"]), "=>", coordinate(info["consequent"]) if not flags["neg"] else coordinate(info["consequent"]).negate()), wrap=True)
-                exper = ForAll(info["vars"], exper)
-                if info["result"]:
-                    exper = expression((coordinate(info["result"]), "and", exper))
-                if logic["conj"] and logic["cc"]:
-                    exper = expression( (exper, logic["cc"], _snepslog(logic["conj"])), True)
-                return exper
-                
-            else:
-                # add the main verb event to the beginning of the expression
-                info["result"].insert(0, predicate(token.lemma_, [ref(token)]))
-
-                # add the past cul if it was in the past
-                if flags["past"]:
-                    info["result"].append(predicate("cul", [info["event"], "past"]))
-                if flags["future"]:
-                    info["result"].append(predicate("cul", [info["event"], "future"]))
-                
-                # coordinate the result with `and` and if there is a neg negate the existential to all and negate th expression
-                result = coordinate(info["result"]) if not flags["neg"] else ForAll(info["vars"], coordinate(info["result"]).negate()) 
-
-                # if there was a conj with the verb add it
-                if logic["conj"] and logic["cc"]:
-                    result = expression( (result, logic["cc"], _snepslog(logic["conj"])) )
-
-                return result
-
-        case "AUX":
-            info = {
-                "main": None,
-                "result": [],
-                "vars": [],
-                "antecedent": [],
-                "consequent": [],
-                "all": False,
-                "neg": False,
-            }
-
-            logic = {
-                "conj": None,
-                "cc": None
-            }
-
-            if is_not(token):
-                info["neg"] = True
-                info["vars"].append(ref(token))
-
-            if quants := get_quantifiers(token):
-                info["all"] = True
-                info["vars"].extend([ref(quant) for quant in set(quants)])
-
-            for child in token.children:
-                match child.dep_:
-                    case "nsubj":
-                        if info["all"]:
-                            info["main"] = predicate(group_set(child))
-                            info["antecedent"].extend(get_modifiers(child, info["main"]))
-                            
-                            if prep := get_dep(child, "prep"):
-                                info["consequent"].extend(get_modifiers(prep, info["main"], neg=info["neg"]))
-                                
-                        else:
-                            info["main"] = predicate(group_set(child))
-                            info["result"].extend(get_modifiers(child, info["main"]))
-
-                            if prep := get_dep(child, "prep"):
-                                info["result"].extend(get_modifiers(prep, info["main"], neg=info["neg"]))
-
-                    case "prep":
-                        if info["all"]:
-                            info["consequent"].extend(get_modifiers(child, info["main"], neg=info["neg"]))
-                        else:
-                            info["result"].extend(get_modifiers(child, info["main"], neg=info["neg"]))
-                    
-                    case "acomp" if child.tag_ == "JJ":
-
-                        if info["all"]:
-                            info["consequent"].extend(surroundV2(child, info["main"]))
-                        else:
-                            info["result"].extend(surroundV2(child, info["main"]))
-
-                    case "acomp" if child.tag_ == "JJR":
-
-                        if info["all"]:
-                        
-                            mod = child
-                            skip = next((child for child in mod.children), None)
-                            info["consequent"].extend(get_modifiers(skip))
-                            obj = predicate(group_set(skip))
-                            info["consequent"].append(predicate(mod.text, [info["main"], obj]))
-                        
-                        else:
-
-                            mod = child
-                            skip = next((child for child in mod.children), None)
-                            info["result"].extend(get_modifiers(skip))
-                            obj = predicate(group_set(skip))
-                            info["result"].append(predicate(mod.text, [info["main"], obj]))
-
-                    case "attr" if child.lemma_.lower() != "member":
-
-                        if info["all"]:
-                            info["consequent"].extend(surroundV2(child, info["main"]))
-                            
-                            if prep := get_dep(child, "prep"):
-                                info["consequent"].extend(get_modifiers(prep, info["main"], neg=info["neg"]))
-
-                        else:
-                            info["result"].extend(surroundV2(child, info["main"]))
-
-                            if prep := get_dep(child, "prep"):
-                                info["result"].extend(get_modifiers(prep, info["main"], neg=info["neg"]))
-
-                    case "attr" if child.lemma_.lower() == "member":
-                        
-                        info["result"].append(predicate(child.text, [info["main"], 'c']))
-                        info["result"].append(predicate("class", ['c']))
-                        
-                        info["antecedent"] = predicate("member", [create_var('thing'), 'c'])
-                        skip = next((child for child in child.children if child.dep_ == "prep"), None)
-                        obj = get_nouns(skip)[0]
-                        info["consequent"] = predicate(obj.text, [create_var('thing')])
-                        info["result"].append(ForAll([create_var('thing')], expression((info["antecedent"], '=>', info["consequent"]))))
-
-                    case "conj":
-                        logic["conj"] = child
-                    case "cc":
-                        logic["cc"] = child.text
-                    case "neg":
-                        info["neg"] = True
-
-            if info["all"]:
-                exper = expression((coordinate(info["antecedent"]), "=>", coordinate(info["consequent"])))
-                result = ForAll(info["vars"], exper if not info["neg"] else exper.negate())
-                if logic["conj"] and logic["cc"]:
-                    result = expression( (exper, info["cc"], _snepslog(logic["conj"])), True)
-                return result
-            else:
-                exper = coordinate(info["result"])
-                if info["neg"]:
-                    exper = exper.negate()
-                if logic["conj"] and logic["cc"]:
-                    exper = expression( (exper, logic["cc"], _snepslog(logic["conj"])), True)
-                return exper
-
-
-    # Default case: General processing & fallthrough from cases above that didn't return
-    children_to_process = [child for child in token.children if child.pos_ not in ["PUNCT", "SCONJ"]]
-    if children_to_process:
-        args = [_snepslog(child) for child in children_to_process]
-        return predicate(token.lemma_, args)
-    else:
-        return predicate([token.lemma_])
-
-def snepslog(sentence):
-    doc = nlp(sentence)
-    return str(_snepslog(get_root(doc)))
-
-
-# Test sentences including linking constructions
-tests = [
-
-    # --- SUBJECT-VERB-OBJECT EXAMPLES --- #
-
-    # "Sam surpasses Bob in height",
-    # "the boy have been given a book by the girl",
-
-    # "The boy is under the girl",
-    # "the bus is inside the building",
-    # "the dog is on the building",
-
-    # "Sam feels that Bob likes tall Mary",
-    # "boys give books to girls",
-    # "the boy feel happy",
-    # "the boy feel very happy",
-    # "Sam feels happy and confident",
-    # "Sam feels very happy and very confident",
-    # "Sam likes Mary",
-    # "the dancers and the singers move gracefully",
-    # "A big dog barked",
-    # "sam killed a man for mary",
-    # "sam will kill bob",
-    # "the tall boy and a small girl does not like a coffee",
-    # "John and Sam gave a book and a toy to a tall girl and tall Mary",
-    # "the boy broke a window with a hammer at school",
-    # "The cat sleeps",
-    # "Sam believes that Bob likes a girl",
-    # "Sam built a small house",
-    # "Bob and Sara don't like the cats",
-    # "Bob doesn't like the cats",
-    # "the boss feels angry",
-    # "the tall sweet girl and nice Mary killed a small man",
-    # "a man was killed by the police",
-    # "the rooms broke on the right",
-    # "a boy does not strongly believes a dog",
-    # "Sam played with a boy",
-    # "Sam loves a lovely girl",
-    # "the boy and the girl ate a cookie",
-    # "Sam gives a book to Mary",
-    # "the room is on the right",
-    # "Caesar was stabbed by Brutus"
-    # "the fat man died",
-    # "John believes that Lucy is rich",
-    "The golfer who scored a 61, won the tournament.",
-    # "the boy loves to pet a dog",
-    # "Sam laughed and Sara slept",
-    
-    # --- Verb Groups --- #
-    
-    # "the flowers and the plants grow in the garden",
-    # "the flowers and the plants grow in the gardens",
-    # "Flowers bloom in the garden",
-    # "Flowers don't bloom in the garden",
-    # "The tall flowers don't bloom in the gardens",
-    # "boys hate apples",
-    # "dancers feel happy",
-    # "the singers perform the songs",
-    # "dancers and singers do not move gracefully",
-    
-    # --- AUX EXAMPLES --- #
-
-    # "John is happy",
-    # "John is not happy",
-    # "John and Bob are happy",
-    # "Bob and Sam are human",
-    # "Sam and Jerry and Bob are friends",
-    # "Sam and Jerry and Bob are not good friends",
-    # "the tall girl is cute",
-    # "the tall girl is not cute",
-    # "men are mortal",
-    # "Sam is mortal",
-    # "a tall girl is cute",
-    # "the boy and the girl are tall",
-    # "Sam is taller than Bob and Jake",
-    # "Sam is taller than a small boy",
-    # "long Sam is not taller than Bob",
-    # "long Sam is not tall",
-
-    # --- Given Examples --- #
-
-    # "the dancers jumped",
-    # "The bear viciously attacked the camper",
-    # "Sam believes that Bob is taller than John",
-
-
-    # -- Odd Examples -- #
-
-    # "Sam is equal to Bob",
-    # "Sam has the ability to run",
-    # "Sam can run",
-    # "Sam is able to run",
-    # "Sam, Bob, and Jerry like a dog", # SpaCy decided to die on this one.
-    # "Fido is a member of the class dog",
-    # "Fido and Joy are members of the class dog",
-    # "Fido belongs to the class_dog.",
-
-    # --- Quantifier Examples --- #
-    # "Every boy loves a dog",
-    # "Every adventurous young boy deeply cherishes a loyal companion dog.",
-    # "every man become old",
-    "all men become old",
-    # "all men are not mortal",
-
-    
-    # --- Testing --- #
-    # "the very extremely tall man kicked the dog",
-    # "sam feels scorched happy",
-    # "the door is on the right",
-    # "the door is very tall",
-
-]
-
-sentence = input("//: ")
-print(snepslog(sentence))
+                    try:
+                        api.inform(results_str)
+                        click.echo(f"\n\t<I> {results_str}\n") 
+                    except SnepsSyntaxError as e:
+                        click.echo(f"\n\t<!> Syntax Error informing '{results_str}': {e}\n")
+                    except SnepsApiError as e:
+                        click.echo(f"\n\t<!> API Error informing '{results_str}': {e}\n")
+                    except Exception as e: 
+                        click.echo(f"\n\t<!> Unexpected error informing '{results_str}': {e}\n")
+
+                except Exception as e: 
+                    click.echo(f"\t<!> Error processing input: {e}") 
+
+    except SnepsApiError as e: 
+        click.echo(f"[!!] A critical SNePS API error occurred: {e}")
+    except Exception as e: 
+        click.echo(f"[!!] An unexpected critical error occurred: {e}")
+    finally:
+        if hasattr(api, 'process') and api.process and api.process.isalive():
+            api.terminate()
+            click.echo("SNePS API terminated.")
+        elif hasattr(api, 'process'): 
+             click.echo("SNePS API was not running or already terminated.")
+
+if __name__ == '__main__':
+    console()
