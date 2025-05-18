@@ -50,6 +50,14 @@ def is_particle(token: Token) -> bool:
     """Checks whether the token is a positional marker"""
     return token.pos_ == "ADP"
 
+def is_many(token: Token) -> bool:
+    """Checks whether the token is a plural quantifier"""
+    return (token.tag_ in ["NNS", "NNPS"] and any(child.lemma_.lower() in ["all", "forall", "every", "each"] for child in token.children))
+
+def is_group(token: Token) -> bool:
+    """Checks whether the token is a group of items"""
+    return (token.tag_ in ["NNS", "NNPS"] and any(child.lemma_.lower() in ["some", "many", "few", "the"] for child in token.children))
+
 def create_var(string: str, seed: int = 0, length: int = 3) -> str:
     """Creates a SHA-HASH of the given string with the given seed and length"""
     string = string + str(seed)
@@ -100,7 +108,7 @@ def coordinate(input: list, operator: str='and', wrap=False) -> expression:
             result = expression((result, operator, predicate), wrap=wrap)
         return result
 
-def _get_components(token: Token, role: str=None, negation: bool=False, reference: str=None, var: str=None) -> list:
+def _get_components(token: Token, role: str=None, negation: bool=False, reference: str=None, var: str=None, level: int=0) -> list:
     _components = []
     if token is None:
         return _components
@@ -109,11 +117,11 @@ def _get_components(token: Token, role: str=None, negation: bool=False, referenc
             _components.append(predicate(child.lemma_, [ref(token)]))
         elif child.dep_ == "advmod":
             _components.append(predicate(child.lemma_, [ref(token), token.lemma_]))
-            other = _get_components(child, role, negation, reference, var)
+            other = _get_components(child, role, negation, reference, var, level)
             if other:
                 _components.extend(other)
         elif child.dep_ == "conj":
-            _components.extend(get_components(child, role, negation, reference, var))
+            _components.extend(get_components(child, role, negation, reference, var, level))
         elif child.dep_ == "acl":
             other = main_snepslog(child)
             if other:
@@ -129,7 +137,7 @@ def _get_components(token: Token, role: str=None, negation: bool=False, referenc
             print(f"Warning: {child.dep_} not implemented")
         return _components
 
-def get_components(token: Token, role: str=None, negation: bool=False, reference: str=None, var: str=None) -> list:
+def get_components(token: Token, role: str=None, negation: bool=False, reference: str=None, var: str=None, level: int=0) -> list:
     """Returns a list of modifiers of the given token"""
     components = []
 
@@ -139,7 +147,7 @@ def get_components(token: Token, role: str=None, negation: bool=False, reference
     elif is_distinct(token):
     
         components.append(predicate(role, [reference, ref(token)]))
-        components.extend(_get_components(token, role, negation, reference, var))
+        components.extend(_get_components(token, role, negation, reference, var, level))
         return components
     
     elif is_thing(token):
@@ -147,7 +155,7 @@ def get_components(token: Token, role: str=None, negation: bool=False, reference
         var_entity = var if var else ref(token)
         components.append(predicate(role, [reference, var_entity]))
         components.append(predicate(token.text, [var_entity])) # Add the token it self: boy(b) or cat(c)
-        components.extend(_get_components(token, role, negation, reference, var_entity))
+        components.extend(_get_components(token, role, negation, reference, var_entity, level))
         return components
 
     elif is_action(token):
@@ -161,14 +169,14 @@ def get_components(token: Token, role: str=None, negation: bool=False, reference
 
         components.append(predicate(role, [reference, ref(token)]))
         components.append(predicate(token.text, [ref(token)]))
-        components.extend(_get_components(token, role, negation, reference, var))
+        components.extend(_get_components(token, role, negation, reference, var, level))
         return components
 
     elif is_particle(token):
 
         skip = next((child for child in token.children), True)
         if skip:
-            components.extend(get_components(token, token.text, negation, reference, var))
+            components.extend(get_components(token, token.text, negation, reference, var, level))
         return components
     
     else:
@@ -179,6 +187,9 @@ def main_snepslog(token: Token) -> expression:
 
     if token is None:
         raise Exception("No token provided")
+    
+    main = {
+    }
 
     match token.pos_:
         case "VERB":
