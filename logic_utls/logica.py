@@ -1,5 +1,7 @@
 import copy
 
+from referencing import Specification
+
 class predicate:
     # Represents a logical predicate or a set of constants.
     def __init__(self, first_arg, second_arg=None):
@@ -409,3 +411,90 @@ class Exists:
 
     def _get_all_segments(self):
         yield self
+
+def coordinate(input: list, operator: str='and', wrap=False) -> expression:
+    """Returns a coordination of the given input"""
+    if not input:
+        return None
+    elif len(input) == 1:
+        return expression(input[0])
+    else:
+        result = expression(input[0])
+        for predicate in input[1:]:
+            result = expression((result, operator, predicate), wrap=wrap)
+        return result
+
+def intentionalize(formula: expression) -> expression:
+    """Transforms the universal intention of the expression"""
+    antecedent, consequent, other = [], [], []
+    vars = []
+    for segment in formula.segments:
+        if isinstance(segment, ForAll) and segment.formula.operator == '=>':
+            vars.extend(segment.variables)
+            antecedent.append(segment.formula.operant_1)
+            consequent.append(segment.formula.operant_2)
+        elif isinstance(segment, ForAll):
+            other.append(segment)
+        else:
+            consequent.append(segment)
+    
+    specification = expression((
+        coordinate(antecedent),
+        "=>",
+        coordinate(consequent)
+    ))
+    
+    result = expression((
+        ForAll(vars, specification),
+        "and",
+        coordinate(other)
+    ))
+    
+    return result
+
+# Example:::
+# --- Atomic Predicates ---
+play_e = predicate("Play", ["e"])
+agent_e_bob = predicate("agent", ["e", "bob"])
+member_x_beta = predicate("member", ["x", "beta"]) # Using "beta" for β
+boy_x = predicate("boy", ["x"])
+agent_e_x = predicate("agent", ["e", "x"])
+student_s = predicate("student", ["s"])
+agent_e_s = predicate("agent", ["e", "s"])
+volleyball_v = predicate("Volleyball", ["v"])
+object_e_v = predicate("object", ["e", "v"])
+
+# --- Quantified Expressions ---
+# ∀x (member(x, β) ⇔ boy(x))
+expr_member_iff_boy = expression((member_x_beta, '<=>', boy_x))
+q1_forall_member_boy = ForAll(["x"], expr_member_iff_boy)
+
+# ∀x (member(x, β) → agent(e,x))
+expr_member_implies_agent = expression((member_x_beta, '=>', agent_e_x))
+q2_forall_member_agent = ForAll(["x"], expr_member_implies_agent)
+
+# ∀s (student(s) → agent(e,s))
+expr_student_implies_agent = expression((student_s, '=>', agent_e_s))
+q3_forall_student_agent = ForAll(["s"], expr_student_implies_agent)
+
+# --- Build the Full Conjunction ---
+# The expression class builds a tree. The default wrap=False for intermediate
+# 'and' expressions is fine for the logical structure. The __str__ method
+# will render it as a flat conjunction.
+
+# Play(e) ∧ agent(e,bob)
+conj1 = expression((play_e, 'and', agent_e_bob))
+# conj1 ∧ ∀x (member(x, β) ⇔ boy(x))
+conj2 = expression((conj1, 'and', q1_forall_member_boy))
+# conj2 ∧ ∀x (member(x, β) → agent(e,x))
+conj3 = expression((conj2, 'and', q2_forall_member_agent))
+# conj3 ∧ ∀s (student(s) → agent(e,s))
+conj4 = expression((conj3, 'and', q3_forall_student_agent))
+# conj4 ∧ Volleyball(v)
+conj5 = expression((conj4, 'and', volleyball_v))
+# conj5 ∧ object(e,v)
+final_fol_expression = expression((conj5, 'and', object_e_v))
+
+# print(final_fol_expression)
+
+# print(intentionalize(final_fol_expression))
