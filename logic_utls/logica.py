@@ -4,14 +4,14 @@ class predicate:
     # Represents a logical predicate or a set of constants.
     def __init__(self, first_arg, second_arg=None):
         if isinstance(first_arg, str) and isinstance(second_arg, list):
-            self.predicate = first_arg
+            self.predicate_name = first_arg 
             self.args = [str(arg) for arg in second_arg]
             self.neg = False
             self._is_constant_set = False
         elif isinstance(first_arg, list) and second_arg is None:
             if not first_arg:
                 raise ValueError("Constant list cannot be empty.")
-            self.predicate = None
+            self.predicate_name = None
             self.args = sorted([str(arg) for arg in first_arg])
             self.neg = False
             self._is_constant_set = True
@@ -28,7 +28,7 @@ class predicate:
         else:
             prefix = "~" if self.neg else ""
             args_str = ", ".join(self.args)
-            return f"{prefix}{self.predicate}({args_str})"
+            return f"{prefix}{self.predicate_name}({args_str})"
 
     def negate(self):
         if self._is_constant_set:
@@ -45,7 +45,7 @@ class predicate:
         if self._is_constant_set:
             return self.args == other.args
         else:
-            return self.predicate == other.predicate and \
+            return self.predicate_name == other.predicate_name and \
                    self.args == other.args and \
                    self.neg == other.neg
 
@@ -53,12 +53,21 @@ class predicate:
         if self._is_constant_set:
             return hash((self._is_constant_set, tuple(self.args)))
         else:
-            return hash((self._is_constant_set, self.predicate, tuple(self.args), self.neg))
+            return hash((self._is_constant_set, self.predicate_name, tuple(self.args), self.neg))
 
     def normalize(self):
-        # Predicates are atomic, normalization primarily involves ensuring it's a copy.
-        # Negation is handled by the negate() method, which normalize() might call on operands.
         return copy.deepcopy(self)
+
+    def _get_all_binary_expressions(self):
+        # Predicates are not binary expressions and do not contain them.
+        yield from () # Corrected: Yields nothing
+
+    def _get_all_predicates(self):
+        yield self
+
+    def _get_all_quantifiers(self):
+        # Predicates are not quantifiers and do not contain them.
+        yield from () # Corrected: Yields nothing
 
 FormulaType = object
 class expression: pass
@@ -66,7 +75,6 @@ class ForAll: pass
 class Exists: pass
 
 class expression:
-    # Represents a logical expression. Returns None if initialized with None.
     def __new__(cls, expression_input, wrap=False):
         if expression_input is None:
             return None
@@ -76,7 +84,7 @@ class expression:
     def __init__(self, expression_input, wrap=False):
         self.is_binary = False
         self.is_atomic = False
-        self.wrap = wrap # wrap controls parenthesization in __str__
+        self.wrap = wrap 
 
         if isinstance(expression_input, tuple):
             if len(expression_input) == 3:
@@ -108,11 +116,11 @@ class expression:
                     self.is_binary = True
                 elif op1 is None and op2 is None: 
                     raise ValueError("Binary expression with both operands None is disallowed.")
-                else: # Should not be reached
+                else: 
                     raise RuntimeError("Internal logic error in tuple-based expression init.")
             else:
                 raise ValueError("Expression tuple must have 3 elements.")
-        elif hasattr(expression_input, 'negate') and callable(expression_input.negate): # Atomic
+        elif hasattr(expression_input, 'negate') and callable(expression_input.negate): 
             self.operant_1 = expression_input
             self.operator = None
             self.operant_2 = None
@@ -123,33 +131,26 @@ class expression:
     def __str__(self):
         if self.is_binary:
             op1_str = str(self.operant_1)
-            # Parenthesize if operand1 is a non-atomic expression and self.wrap is True
             if isinstance(self.operant_1, expression) and self.operant_1.is_binary and self.wrap :
                  op1_str = f"({op1_str})"
-            # Also wrap quantifiers if they are operands and self.wrap is True
             elif isinstance(self.operant_1, (ForAll, Exists)) and self.wrap:
                  op1_str = f"({op1_str})"
 
             op2_str = str(self.operant_2)
-            # Parenthesize if operand2 is a non-atomic expression and self.wrap is True
             if isinstance(self.operant_2, expression) and self.operant_2.is_binary and self.wrap:
                  op2_str = f"({op2_str})"
             elif isinstance(self.operant_2, (ForAll, Exists)) and self.wrap:
                  op2_str = f"({op2_str})"
             
             binary_content = f"{op1_str} {self.operator} {op2_str}"
-            # Only add outer parentheses if self.wrap is True
             return f"({binary_content})" if self.wrap else binary_content
-
         elif self.is_atomic:
             return str(self.operant_1)
         else:
-            # This state should ideally not be reachable if constructors are correct.
             return "[Invalid Expression State]"
 
     def negate(self):
         if self.is_binary:
-            # Apply De Morgan's laws and other negation rules
             op1_negated = self.operant_1.negate()
             op2_negated = self.operant_2.negate()
             if self.operator == 'and': 
@@ -157,97 +158,61 @@ class expression:
             elif self.operator == 'or': 
                 return expression((op1_negated, 'and', op2_negated), wrap=self.wrap)
             elif self.operator == '=>':
-                # Negation of (A => B) is (A and ~B)
-                op1_copy = copy.deepcopy(self.operant_1) # A remains A
+                op1_copy = copy.deepcopy(self.operant_1) 
                 return expression((op1_copy, 'and', op2_negated), wrap=self.wrap)
             elif self.operator == '<=>':
-                # Negation of (A <=> B) is (A and ~B) or (~A and B), or A ^ B
-                # Using (A and ~B) or (~A and B) for clarity
                 op1_copy = copy.deepcopy(self.operant_1)
                 op2_copy = copy.deepcopy(self.operant_2)
-                left_expr = expression((op1_copy, 'and', op2_negated), wrap=True) # (A and ~B)
-                right_expr = expression((op1_negated, 'and', op2_copy), wrap=True) # (~A and B)
+                left_expr = expression((op1_copy, 'and', op2_negated), wrap=True) 
+                right_expr = expression((op1_negated, 'and', op2_copy), wrap=True) 
                 return expression((left_expr, 'or', right_expr), wrap=self.wrap)
-            elif self.operator == '^': # XOR
-                # Negation of (A ^ B) is (A and B) or (~A and ~B), which is A <=> B
+            elif self.operator == '^': 
                 op1_copy = copy.deepcopy(self.operant_1)
                 op2_copy = copy.deepcopy(self.operant_2)
-                left_expr = expression((op1_copy, 'and', op2_copy), wrap=True) # (A and B)
-                right_expr = expression((op1_negated, 'and', op2_negated), wrap=True) # (~A and ~B)
+                left_expr = expression((op1_copy, 'and', op2_copy), wrap=True) 
+                right_expr = expression((op1_negated, 'and', op2_negated), wrap=True) 
                 return expression((left_expr, 'or', right_expr), wrap=self.wrap)
             else:
-                # Should not happen if operator is validated in __init__
                 raise ValueError(f"Negation rule undefined for operator: {self.operator}")
         elif self.is_atomic:
-            # Negate the atomic formula (e.g., a predicate or a quantified expression)
             return self.operant_1.negate()
         else:
             raise RuntimeError("Cannot negate expression in invalid state.")
 
     def normalize(self):
-        # Converts the expression to Negation Normal Form (NNF)
-        # 1. Eliminates =>, <=>, ^
-        # 2. Pushes negations inward using negate()
         if self.is_atomic:
-            # If operant_1 has its own normalize method (e.g., it's an expression, ForAll, Exists)
             if hasattr(self.operant_1, 'normalize') and callable(self.operant_1.normalize):
                  normalized_operant_1 = self.operant_1.normalize()
-                 # Re-wrap as an atomic expression, respecting original wrap intent for this level
                  return expression(normalized_operant_1, wrap=self.wrap)
-            else: # It's a base type like predicate (which has a basic normalize)
+            else: 
                 return expression(copy.deepcopy(self.operant_1), wrap=self.wrap)
-
         elif self.is_binary:
             if self.operator == '=>':
-                # A => B  is equivalent to ~A or B
-                negated_op1 = self.operant_1.negate() # This pushes negation into op1
-                # The new expression is (~A or B). We then normalize this structure.
-                # Pass original wrap status to the new expression
+                negated_op1 = self.operant_1.negate() 
                 new_expr = expression((negated_op1, 'or', copy.deepcopy(self.operant_2)), wrap=self.wrap)
-                return new_expr.normalize() # Recursively normalize
-
+                return new_expr.normalize() 
             elif self.operator == '<=>':
-                # A <=> B is equivalent to (A => B) and (B => A)
-                # which is (~A or B) and (~B or A)
-                # Build these intermediate expressions and then normalize the final structure.
-                
-                # (~A or B)
                 term1_op1_neg = self.operant_1.negate()
                 term1 = expression((term1_op1_neg, 'or', copy.deepcopy(self.operant_2)), wrap=True)
-                
-                # (~B or A)
-                term2_op2_neg = self.operant_2.negate() # Corrected from term2_op1_neg
+                term2_op2_neg = self.operant_2.negate() 
                 term2 = expression((term2_op2_neg, 'or', copy.deepcopy(self.operant_1)), wrap=True)
-                
                 new_expr = expression((term1, 'and', term2), wrap=self.wrap)
                 return new_expr.normalize()
-
-            elif self.operator == '^': # XOR
-                # A ^ B is equivalent to (A and ~B) or (~A and B)
-                
-                # (A and ~B)
+            elif self.operator == '^': 
                 term1_op2_neg = self.operant_2.negate()
                 term1 = expression((copy.deepcopy(self.operant_1), 'and', term1_op2_neg), wrap=True)
-
-                # (~A and B)
                 term2_op1_neg = self.operant_1.negate()
                 term2 = expression((term2_op1_neg, 'and', copy.deepcopy(self.operant_2)), wrap=True)
-                
                 new_expr = expression((term1, 'or', term2), wrap=self.wrap)
                 return new_expr.normalize()
-
             elif self.operator in ['and', 'or']:
-                # For 'and' and 'or', normalize the operands.
-                # The negate() calls within normalization of =>, <=>, ^ will handle DeMorgan's
                 norm_op1 = self.operant_1.normalize()
                 norm_op2 = self.operant_2.normalize()
                 return expression((norm_op1, self.operator, norm_op2), wrap=self.wrap)
             else:
-                # This case should ideally not be reached if operators are validated.
                 raise ValueError(f"Normalization rule undefined for operator: {self.operator}")
         else:
             raise RuntimeError("Expression in invalid state for normalization.")
-
 
     def __eq__(self, other):
         if not isinstance(other, expression):
@@ -260,7 +225,7 @@ class expression:
                    self.operant_2 == other.operant_2
         elif self.is_atomic:
             return self.operant_1 == other.operant_1
-        else: # Invalid state
+        else: 
             return False
 
     def __hash__(self):
@@ -269,57 +234,77 @@ class expression:
         elif self.is_atomic:
             return hash(('atomic', self.operant_1))
         else:
-            # Ensure all attributes are hashable and consistently ordered for invalid state
-            # This might be fragile if new unhashable attributes are added without updating.
             sorted_vars = tuple(sorted(vars(self).items(), key=lambda item: str(item[0])))
             return hash(('invalid_expression_state', sorted_vars))
 
-
     def __getnewargs_ex__(self):
-        """
-        Provides arguments for __new__ to support deepcopy and pickle.
-        Returns ((expression_input_arg, wrap_arg), {kwargs_for_new}).
-        """
         if self.is_atomic:
             expression_input_val = self.operant_1
         elif self.is_binary:
             expression_input_val = (self.operant_1, self.operator, self.operant_2)
         else:
-            # This case should ideally not be reached if the object is valid.
             raise RuntimeError("Expression is in an invalid state (neither atomic nor binary) and cannot be deepcopied.")
         return (expression_input_val, self.wrap), {}
 
+    def _get_all_binary_expressions(self):
+        if self.is_binary:
+            yield self
+        
+        if self.operant_1 is not None and hasattr(self.operant_1, '_get_all_binary_expressions'):
+            yield from self.operant_1._get_all_binary_expressions()
+        
+        if self.is_binary and self.operant_2 is not None and hasattr(self.operant_2, '_get_all_binary_expressions'):
+            yield from self.operant_2._get_all_binary_expressions()
+
+    def _get_all_predicates(self):
+        if self.operant_1 is not None and hasattr(self.operant_1, '_get_all_predicates'):
+            yield from self.operant_1._get_all_predicates()
+        
+        if self.is_binary and self.operant_2 is not None and hasattr(self.operant_2, '_get_all_predicates'):
+            yield from self.operant_2._get_all_predicates()
+
+    def _get_all_quantifiers(self):
+        if self.operant_1 is not None and hasattr(self.operant_1, '_get_all_quantifiers'):
+            yield from self.operant_1._get_all_quantifiers()
+        
+        if self.is_binary and self.operant_2 is not None and hasattr(self.operant_2, '_get_all_quantifiers'):
+            yield from self.operant_2._get_all_quantifiers()
+
+    @property
+    def expressions(self):
+        yield from self._get_all_binary_expressions()
+
+    @property
+    def predicates(self):
+        yield from self._get_all_predicates()
+
+    @property
+    def quantifiers(self):
+        yield from self._get_all_quantifiers()
 
 class ForAll:
-    # Represents a universally quantified formula.
     def __init__(self, variable_names, formula):
         if not isinstance(variable_names, list) or not all(isinstance(v, str) for v in variable_names):
             raise TypeError("Variable names must be a list of strings.")
         if not variable_names:
             raise ValueError("Quantifier needs at least one variable.")
-        # Ensure the formula part has a negate method, if it's not None
         if formula is not None and not (hasattr(formula, 'negate') and callable(formula.negate)):
             raise TypeError("Quantified formula lacks .negate().")
         self.variables = variable_names
-        self.formula = formula # This can be an expression, predicate, or another quantifier
+        self.formula = formula 
 
     def __str__(self):
         vars_str = ", ".join(self.variables)
         formula_str = str(self.formula) if self.formula is not None else "(Phi)"
-        # If formula is a binary expression, wrap it in parentheses for clarity.
-        if isinstance(self.formula, expression) and self.formula.is_binary : # and self.formula.wrap:
-             return f"all({vars_str})({formula_str})" # Rely on expression's __str__ for its own wrapping
+        if isinstance(self.formula, expression) and self.formula.is_binary : 
+             return f"all({vars_str})({formula_str})" 
         return f"all({vars_str}){formula_str}"
 
-
     def negate(self):
-        # Negation of all(vars) F is exists(vars) ~F
         negated_formula = self.formula.negate() if self.formula is not None else None
         return Exists(copy.deepcopy(self.variables), negated_formula)
 
     def normalize(self):
-        # Normalizes the quantified formula.
-        # The quantifier itself (all vs exists) is handled by negation rules if a negation is outside.
         normalized_formula = self.formula.normalize() if self.formula is not None else None
         return ForAll(copy.deepcopy(self.variables), normalized_formula)
 
@@ -331,8 +316,20 @@ class ForAll:
     def __hash__(self):
         return hash(('all', tuple(self.variables), self.formula))
 
+    def _get_all_binary_expressions(self):
+        if self.formula is not None and hasattr(self.formula, '_get_all_binary_expressions'):
+            yield from self.formula._get_all_binary_expressions()
+    
+    def _get_all_predicates(self):
+        if self.formula is not None and hasattr(self.formula, '_get_all_predicates'):
+            yield from self.formula._get_all_predicates()
+
+    def _get_all_quantifiers(self):
+        yield self 
+        if self.formula is not None and hasattr(self.formula, '_get_all_quantifiers'):
+            yield from self.formula._get_all_quantifiers()
+
 class Exists:
-    # Represents an existentially quantified formula.
     def __init__(self, variable_names, formula):
         if not isinstance(variable_names, list) or not all(isinstance(v, str) for v in variable_names):
             raise TypeError("Variable names must be a list of strings.")
@@ -346,13 +343,11 @@ class Exists:
     def __str__(self):
         vars_str = ", ".join(self.variables)
         formula_str = str(self.formula) if self.formula is not None else "(Phi)"
-        if isinstance(self.formula, expression) and self.formula.is_binary : # and self.formula.wrap:
+        if isinstance(self.formula, expression) and self.formula.is_binary : 
              return f"exists({vars_str})({formula_str})"
         return f"exists({vars_str}){formula_str}"
 
-
     def negate(self):
-        # Negation of exists(vars) F is all(vars) ~F
         negated_formula = self.formula.negate() if self.formula is not None else None
         return ForAll(copy.deepcopy(self.variables), negated_formula)
 
@@ -367,3 +362,36 @@ class Exists:
 
     def __hash__(self):
         return hash(('exists', tuple(self.variables), self.formula))
+
+    def _get_all_binary_expressions(self):
+        if self.formula is not None and hasattr(self.formula, '_get_all_binary_expressions'):
+            yield from self.formula._get_all_binary_expressions()
+    
+    def _get_all_predicates(self):
+        if self.formula is not None and hasattr(self.formula, '_get_all_predicates'):
+            yield from self.formula._get_all_predicates()
+
+    def _get_all_quantifiers(self):
+        yield self 
+        if self.formula is not None and hasattr(self.formula, '_get_all_quantifiers'):
+            yield from self.formula._get_all_quantifiers()
+
+def search(formula, target_predicate: predicate): 
+    if formula is None:
+        return None
+    if isinstance(formula, expression):
+        if formula.is_atomic:
+            return search(formula.operant_1, target_predicate) 
+        elif formula.is_binary:
+            found_in_op1 = search(formula.operant_1, target_predicate)
+            if found_in_op1:
+                return found_in_op1
+            return search(formula.operant_2, target_predicate)
+    elif isinstance(formula, predicate): 
+        if formula == target_predicate: 
+            return formula
+        else:
+            return None
+    elif isinstance(formula, ForAll) or isinstance(formula, Exists): 
+        return search(formula.formula, target_predicate)
+    return None 
