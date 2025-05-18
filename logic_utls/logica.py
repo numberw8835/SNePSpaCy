@@ -305,7 +305,7 @@ class ForAll:
 
     def __str__(self):
         vars_str = ", ".join(self.variables)
-        formula_str = str(self.formula) if self.formula is not None else "[None]"
+        formula_str = str(self.formula) if self.formula is not None else "(Phi)"
         # If formula is a binary expression, wrap it in parentheses for clarity.
         if isinstance(self.formula, expression) and self.formula.is_binary : # and self.formula.wrap:
              return f"all({vars_str})({formula_str})" # Rely on expression's __str__ for its own wrapping
@@ -345,7 +345,7 @@ class Exists:
 
     def __str__(self):
         vars_str = ", ".join(self.variables)
-        formula_str = str(self.formula) if self.formula is not None else "[None]"
+        formula_str = str(self.formula) if self.formula is not None else "(Phi)"
         if isinstance(self.formula, expression) and self.formula.is_binary : # and self.formula.wrap:
              return f"exists({vars_str})({formula_str})"
         return f"exists({vars_str}){formula_str}"
@@ -367,4 +367,3 @@ class Exists:
 
     def __hash__(self):
         return hash(('exists', tuple(self.variables), self.formula))
-
