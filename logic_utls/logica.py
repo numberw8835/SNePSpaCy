@@ -59,15 +59,17 @@ class predicate:
         return copy.deepcopy(self)
 
     def _get_all_binary_expressions(self):
-        # Predicates are not binary expressions and do not contain them.
-        yield from () # Corrected: Yields nothing
+        yield from () 
 
     def _get_all_predicates(self):
         yield self
 
     def _get_all_quantifiers(self):
-        # Predicates are not quantifiers and do not contain them.
-        yield from () # Corrected: Yields nothing
+        yield from () 
+
+    def _get_all_segments(self):
+        yield self
+
 
 FormulaType = object
 class expression: pass
@@ -270,6 +272,27 @@ class expression:
         if self.is_binary and self.operant_2 is not None and hasattr(self.operant_2, '_get_all_quantifiers'):
             yield from self.operant_2._get_all_quantifiers()
 
+    def _get_all_segments(self):
+        if self.is_binary and self.operator == 'and':
+            if hasattr(self.operant_1, '_get_all_segments'):
+                yield from self.operant_1._get_all_segments()
+            else: # Should not happen if operant_1 is a valid formula component
+                yield self.operant_1 
+            
+            if hasattr(self.operant_2, '_get_all_segments'):
+                yield from self.operant_2._get_all_segments()
+            else: # Should not happen if operant_2 is a valid formula component
+                yield self.operant_2
+        elif self.is_atomic:
+             # If the atomic operant itself can have segments (e.g. it's a nested 'and' expression)
+            if hasattr(self.operant_1, '_get_all_segments'):
+                yield from self.operant_1._get_all_segments()
+            else: # It's a simple atomic like a predicate or quantifier
+                yield self.operant_1
+        else: # Not an 'and' expression, and not atomic (e.g. 'or', '=>', etc.)
+            yield self
+
+
     @property
     def expressions(self):
         yield from self._get_all_binary_expressions()
@@ -281,6 +304,10 @@ class expression:
     @property
     def quantifiers(self):
         yield from self._get_all_quantifiers()
+        
+    @property
+    def segments(self):
+        yield from self._get_all_segments()
 
 class ForAll:
     def __init__(self, variable_names, formula):
@@ -329,6 +356,10 @@ class ForAll:
         if self.formula is not None and hasattr(self.formula, '_get_all_quantifiers'):
             yield from self.formula._get_all_quantifiers()
 
+    def _get_all_segments(self):
+        yield self
+
+
 class Exists:
     def __init__(self, variable_names, formula):
         if not isinstance(variable_names, list) or not all(isinstance(v, str) for v in variable_names):
@@ -376,22 +407,5 @@ class Exists:
         if self.formula is not None and hasattr(self.formula, '_get_all_quantifiers'):
             yield from self.formula._get_all_quantifiers()
 
-def search(formula, target_predicate: predicate): 
-    if formula is None:
-        return None
-    if isinstance(formula, expression):
-        if formula.is_atomic:
-            return search(formula.operant_1, target_predicate) 
-        elif formula.is_binary:
-            found_in_op1 = search(formula.operant_1, target_predicate)
-            if found_in_op1:
-                return found_in_op1
-            return search(formula.operant_2, target_predicate)
-    elif isinstance(formula, predicate): 
-        if formula == target_predicate: 
-            return formula
-        else:
-            return None
-    elif isinstance(formula, ForAll) or isinstance(formula, Exists): 
-        return search(formula.formula, target_predicate)
-    return None 
+    def _get_all_segments(self):
+        yield self
