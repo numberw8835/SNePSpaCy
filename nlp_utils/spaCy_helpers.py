@@ -1,5 +1,6 @@
 import hashlib
 from spacy.tokens import Token
+from logic_utls.logica import predicate, expression, ForAll
 
 def get_root(sentence: list) -> Token:
     """Returns the root token"""
@@ -16,6 +17,10 @@ def is_distinct(token: Token) -> bool:
 def is_action(token: Token) -> bool:
     """Checks whether the token is a Verb"""
     return token.pos_ == "VERB"
+
+def is_state(token: Token) -> bool:
+    """Checks if the token is a state of being"""
+    return token.pos_ == "AUX"
 
 def is_thing(token: Token) -> bool:
     """Checks whether the token is a Noun"""
@@ -65,7 +70,7 @@ def ref(token: Token, seed: int = 0, length: int = 3) -> str:
     elif is_num(token):
         return token.text
     elif is_pron(token):
-        return "?" + create_var(token.text, seed, length-1)
+        return ref(token.head.head)
     elif is_particle(token):
         raise Exception(f"({token}) Not direct reference")
     else:
@@ -83,14 +88,103 @@ def get_actors(token: Token) -> list:
             actors.extend(get_actors(child))
     return actors
 
-#TODO: Complete the get_modifier function
-def _get_modifiers(token: Token, reference: str) -> list:
-    pass
+def coordinate(input: list, operator: str='and', wrap=False) -> expression:
+    """Returns a coordination of the given input"""
+    if not input:
+        return None
+    elif len(input) == 1:
+        return expression(input[0])
+    else:
+        result = expression(input[0])
+        for predicate in input[1:]:
+            result = expression((result, operator, predicate), wrap=wrap)
+        return result
 
-def get_modifiers(token: Token, reference: str) -> list:
-    """Returns a list of modifiers of the given token"""
-    modifiers = []
+def _get_components(token: Token, role: str=None, negation: bool=False, reference: str=None, var: str=None) -> list:
+    _components = []
     if token is None:
-        return modifiers
+        return _components
+    for child in token.children:
+        if child.dep_ == "amod":
+            _components.append(predicate(child.lemma_, [ref(token)]))
+        elif child.dep_ == "advmod":
+            _components.append(predicate(child.lemma_, [ref(token), token.lemma_]))
+            other = _get_components(child, role, negation, reference, var)
+            if other:
+                _components.extend(other)
+        elif child.dep_ == "conj":
+            _components.extend(get_components(child, role, negation, reference, var))
+        elif child.dep_ == "acl":
+            other = main_snepslog(child)
+            if other:
+                _components.append(predicate("concerns", [ref(token), other]))
+        elif child.dep_ == "relcl":
+            if other:
+                _components.append(predicate("concerns", [ref(token), other]))
+        elif child.dep_ == "compound":
+            _components.append(predicate(child.lemma_, [ref(token)]))
+        elif child.dep_ == "det":
+            pass
+        else:
+            print(f"Warning: {child.dep_} not implemented")
+        return _components
+
+def get_components(token: Token, role: str=None, negation: bool=False, reference: str=None, var: str=None) -> list:
+    """Returns a list of modifiers of the given token"""
+    components = []
+
+    if token is None:
+        return components
+    
     elif is_distinct(token):
-        pass
+    
+        components.append(predicate(role, [reference, ref(token)]))
+        components.extend(_get_components(token, role, negation, reference, var))
+        return components
+    
+    elif is_thing(token):
+
+        var_entity = var if var else ref(token)
+        components.append(predicate(role, [reference, var_entity]))
+        components.append(predicate(token.text, [var_entity])) # Add the token it self: boy(b) or cat(c)
+        components.extend(_get_components(token, role, negation, reference, var_entity))
+        return components
+
+    elif is_action(token):
+
+        components.append(predicate(role, [reference, ref(token)]))
+        components.append(predicate(token.lemma_, [ref(token)])) 
+        components.extend(main_snepslog(token))
+        return components
+
+    elif is_modifier(token):
+
+        components.append(predicate(role, [reference, ref(token)]))
+        components.append(predicate(token.text, [ref(token)]))
+        components.extend(_get_components(token, role, negation, reference, var))
+        return components
+
+    elif is_particle(token):
+
+        skip = next((child for child in token.children), True)
+        if skip:
+            components.extend(get_components(token, token.text, negation, reference, var))
+        return components
+    
+    else:
+        raise Exception(f"({token}, {token.pos_}) Is an unknown token type, please account for it")
+
+#TODO: Handle the children, nsubj, dobj, and so on...
+def main_snepslog(token: Token) -> expression:
+
+    if token is None:
+        raise Exception("No token provided")
+
+    match token.pos_:
+        case "VERB":
+            for child in token.children:
+                pass
+
+        case "AUX":
+            for child in token.children:
+                pass

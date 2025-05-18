@@ -1,6 +1,6 @@
 import spacy
-
-from nlp_utils.spaCy_helpers import get_root
+from spacy.tokens import Token
+from nlp_utils.spaCy_helpers import get_root, main_snepslog
 
 class snepslog:
     def __init__(self, model="en_core_web_trf"):
@@ -14,6 +14,6 @@ class snepslog:
         for sent in sentences:
             transcribed.append(self._sneps(get_root(sent)))
         return transcribed
-    
-    def _sneps(self, token):
-        return token.lemma_
+
+def _sneps(token: Token) -> str:
+    return str(main_snepslog(token))
