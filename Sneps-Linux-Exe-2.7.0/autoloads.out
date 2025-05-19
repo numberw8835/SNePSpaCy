@@ -1,0 +1,144 @@
+The following two tables contain the names of functions, macros and classes
+that might cause autoloading during the running of your application. While
+macros can be autoloaded, they are only autoloaded when source code that
+uses them is evaluated or compiled, so unless you are doing evaluation or
+compilation in your application at runtime you can ignore macro autoloads.
+
+Autoloading can potentially cause a runtime failure of your application.
+You have two options for preventing this failure:
+
+1. Use the `runtime-bundle' keyword argument to generate-application.  This
+   causes a special and smaller version of files.bu to be used by the
+   application, one that contains redistributable files according to the
+   license agreement for Allegro Runtime.  We suggest you use the
+   runtime-bundle option and then test that the functions you wish to call
+   are properly loaded from the runtime bundle.
+
+2. Require the modules that you need.  This is the preferrable option.
+
+The first table contains the names of autoloaded classes.  The first column
+is the module name (acceptable to common-lisp:require) and the second
+column is the symbol naming the class.  If find-class is called, either
+directly or indirectly by your application, on a class listed in this
+table, then the module in column one will be loaded.
+
+The second table contains the names of autoloaded functions and macros.  If
+any of the functions listed in column two are called, then the file listed
+in column one will be autoloaded.  To prevent autoloading at application
+runtime, you should require the file containing the autoloaded functions
+you will use during the execution of your application. For example, for a
+file foo.fasl and a function foo, you should add to your application the
+following form:
+
+   (eval-when (compile eval load) (require :foo))
+
+This will properly prevent autoloading for functions contained in the
+module :foo.
+
+
+module name            autoloaded class
+-----------            ----------------
+streamm                mapped-file-simple-stream
+streamc                excl::string-output-with-encapsulated-annotation-stream
+streamc                excl::xp-stream
+streamp                pipe-stream
+
+
+file name              autoloaded symbol
+---------              -----------------
+acldns.fasl            acl-socket:dns-query
+acldns.fasl            acl-socket:dns-lookup-hostname
+acldns.fasl            acl-socket:dns-ipaddr-to-hostname
+acldns.fasl            acl-socket:configure-dns
+build.fasl             build-lisp-image
+collate.fasl           parse-ucet
+collate.fasl           string-sort-key
+collate.fasl           unicode-nfd
+collate.fasl           unicode-combining-class
+defctype.fasl          foreign-functions:make-cstruct
+defctype.fasl          foreign-functions:malloc-cstruct
+defctype.fasl          foreign-functions:free-cstruct
+defctype.fasl          foreign-functions::cstruct-constructor-generator-3
+defctype.fasl          foreign-functions::cstruct-constructor-generator
+defctype.fasl          foreign-functions::cstruct-tr
+defctype.fasl          foreign-functions::cstruct-setf-expander
+disasm.fasl            disassemble
+efmacs.fasl            excl::prebuild-all-efs
+efmacs.fasl            generate-filled-ef-templates
+efmacs.fasl            find-composed-external-format
+efmacs.fasl            eol-convention
+eli.fasl               start-emacs-lisp-interface
+emacs.fasl             excl::list-all-completions-search
+emacs.fasl             excl::list-all-completions
+emacs.fasl             excl::list-all-completions-abbrev-search
+euc.fasl               excl::process-code
+euc.fasl               string-to-euc
+euc.fasl               euc-to-string
+ffcompat.fasl          foreign-functions:char*-to-euc
+ffcompat.fasl          foreign-functions:string-to-char*
+ffcompat.fasl          foreign-functions:convert-to-lang
+ffcompat.fasl          foreign-functions:remove-entry-point
+ffcompat.fasl          foreign-functions:char*-string-length
+ffcompat.fasl          foreign-functions:unregister-function
+ffcompat.fasl          foreign-functions:string-to-wchar*
+ffcompat.fasl          foreign-functions:register-function
+ffcompat.fasl          foreign-functions:unregister-value
+ffcompat.fasl          foreign-functions:register-value
+ffcompat.fasl          foreign-functions:wchar*-string-length
+ffcompat.fasl          foreign-functions:char*-to-string
+ffcompat.fasl          foreign-functions:euc-to-char*
+ffcompat.fasl          foreign-functions:remove-extern-code-address
+ffcompat.fasl          foreign-functions:get-entry-points
+ffcompat.fasl          foreign-functions:wchar*-to-string
+ffcompat.fasl          foreign-functions:defforeign-list
+ffcompat.fasl          foreign-functions:foreign-strlen
+ffcompat.fasl          foreign-functions:remove-extern-data-address
+ffcompat.fasl          foreign-functions::foreign-arg
+ffcompat.fasl          foreign-functions::defforeign-1
+fileutil.fasl          excl::backup-file-name
+fileutil.fasl          map-over-directory
+fileutil.fasl          copy-directory
+fileutil.fasl          directory-size
+fileutil.fasl          delete-directory-and-files
+fileutil.fasl          pathname-sans-file
+ftp.fasl               acl-socket:ftp-transfer-file
+ftp.fasl               acl-socket:open-ftp-stream
+genapp.fasl            generate-application
+generate.fasl          generate-rsa-keys
+genexe.fasl            generate-executable
+hmac.fasl              hmac-md5-init
+hmac.fasl              hmac-sha1-update
+hmac.fasl              hmac-md5-update
+hmac.fasl              hmac-md5-final
+hmac.fasl              hmac-sha1-init
+hmac.fasl              hmac-md5-string
+hmac.fasl              hmac-sha1-final
+hmac.fasl              hmac-sha1-string
+inspect.fasl           inspect
+lldb.fasl              excl::breakpoint-1
+lldb.fasl              excl::install-breakpoints
+lldb.fasl              add-breakpoint
+lldb.fasl              delete-breakpoint
+locale.fasl            excl::locale-time-ut-to-format-control-args
+lze.fasl               use-background-streams
+rc4.fasl               rc4-set-key
+rc4.fasl               rc4
+scm.fasl               ed
+sha1.fasl              sha1-final
+sha1.fasl              sha1-string
+sha1.fasl              sha1-update
+sha1.fasl              sha1-file
+sha1.fasl              sha1-init
+ssl.fasl               acl-socket:make-ssl-server-stream
+ssl.fasl               acl-socket:make-ssl-client-stream
+step.fasl              excl::step-1
+streamp.fasl           make-pipe-stream
+streamp.fasl           make-function-input-stream
+trace.fasl             funtrace
+trace.fasl             funwrap
+trace.fasl             ftrace
+update.fasl            system:update-allegro
+walker.fasl            excl::old-compiler-walk
+walker.fasl            excl::walk
+xref.fasl              excl::list-undefined-functions
+xref.fasl              excl::list-unused-functions

@@ -15,5 +15,5 @@ class snepslog:
             transcribed.append(self._sneps(get_root(sent)))
         return transcribed
 
-def _sneps(token: Token) -> str:
-    return str(main_snepslog(token))
+    def _sneps(self, token: Token) -> str:
+        return str(main_snepslog(token))

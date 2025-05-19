@@ -131,14 +131,14 @@ def console():
             else: # Default to inform (SNePS expressions directly)
                 try:
                     #TODO: Change it to use engine again
-                    results_str = user_input_trimmed 
+                    results_str = engine.transcribe(user_input_trimmed)
                     
                     if not results_str: 
                         click.echo("<?> Input is empty.") 
                         continue
                     
                     try:
-                        api.inform(results_str)
+                        # api.inform(results_str)
                         click.echo(f"\n\t<I> {results_str}\n") 
                     except SnepsSyntaxError as e:
                         click.echo(f"\n\t<!> Syntax Error informing '{results_str}': {e}\n")
