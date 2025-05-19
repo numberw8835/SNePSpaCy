@@ -1,5 +1,7 @@
 import hashlib
 from spacy.tokens import Token
+# import spacy
+# from ..logic_utls.logica import predicate, expression, ForAll, intentionalize
 from logic_utls.logica import predicate, expression, ForAll, intentionalize
 
 def get_root(sentence: list) -> Token:
@@ -138,6 +140,7 @@ def _get_components(token: Token, negation: bool=False, reference: str=None, var
             if other:
                 _components.append(predicate("concerns", [true_ref, other]))
         elif child.dep_ == "relcl":
+            other = main_snepslog(child)
             if other:
                 _components.append(predicate("concerns", [true_ref, other]))
         elif child.dep_ == "prep":
@@ -163,7 +166,7 @@ def get_components(token: Token, role: str=None, negation: bool=False, reference
     if token is None:
         return components
     
-    elif is_distinct(token):
+    elif is_distinct(token) or is_pron(token) or is_num(token):
     
         components.append(predicate(role, [reference, ref(token)]))
         components.extend(_get_components(token, negation, reference, var, level))
@@ -263,10 +266,13 @@ def main_snepslog(token: Token) -> expression:
     name = token.lemma_ if is_action(token) else "state_of_being"
     negation = is_not(token)
     result = [predicate(name, [ref(token)])]
+    conjunct = None
+    connective = None
 
     match token.pos_:
         case "VERB" | "AUX":
             for child in token.children:
+                
                 roles = {
                     "nsubj": "agent",
                     "dobj": "object",
@@ -280,9 +286,16 @@ def main_snepslog(token: Token) -> expression:
                     "acomp": "content",
                     "attr": "attribute",
                 }
+
                 if child.dep_ in roles:
                     result.extend(get_components(child, roles[child.dep_], negation, ref(token), None, seed))
                     seed += len(result)
+                elif child.dep_ in ["amod", "advmod"]:
+                    result.extend(_get_components(child, negation, None, ref(token), seed))
+                elif child.dep_ == "conj":
+                    conjunct = main_snepslog(child)
+                elif child.dep_ == "cc":
+                    connective = child.text
                     
             result = intentionalize(coordinate(result), negation)
             for quant in result.quantifiers:
@@ -295,4 +308,12 @@ def main_snepslog(token: Token) -> expression:
                             quant.variables.append(ref(token))
                             if hasattr(quant.formula.operant_2, "negate"):
                                 quant.formula.operant_2 = quant.formula.operant_2.negate()
-            return result
+            if conjunct:
+                result = expression((result, connective, conjunct))
+            return result 
+
+## --- TESTING --- ###
+# nlp = spacy.load("en_core_web_trf")
+# doc = nlp("the golfer who scored 86, won the tournament")
+# root = get_root(doc)
+# print(main_snepslog(root))
