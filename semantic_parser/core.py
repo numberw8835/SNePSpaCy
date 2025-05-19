@@ -9,11 +9,7 @@ class snepslog:
     
     def transcribe(self, passage):
         doc = self.nlp(passage)
-        sentences = [sent for sent in doc.sents]
-        transcribed = []
-        for sent in sentences:
-            transcribed.append(self._sneps(get_root(sent)))
-        return transcribed
+        return self._sneps(get_root(doc))
 
     def _sneps(self, token: Token) -> str:
         return str(main_snepslog(token))
