@@ -481,7 +481,7 @@ def coordinate(input_list: list, operator: str='and', wrap=False) -> expression:
             result = expression((result, operator, current_expr), wrap=wrap)
         return result
 
-def intentionalize(formula: expression) -> expression:
+def intentionalize(formula: expression, negation: bool = False) -> expression:
     """Transforms the universal intention of the expression"""
     # Ensure formula.quantifiers is available and produces a list for the check
     all_quantifiers = list(formula.quantifiers) if hasattr(formula, 'quantifiers') and formula.quantifiers is not None else []
@@ -506,10 +506,11 @@ def intentionalize(formula: expression) -> expression:
             other.append(segment)
         elif segment is not None : # Ensure segment is not None before appending
             consequent.append(segment)
-
+    
     # Coordinate returns expression or None
+    logic = "and" if not negation else "or"
     coord_antecedent = coordinate(antecedent) if antecedent else None
-    coord_consequent = coordinate(consequent) if consequent else None
+    coord_consequent = coordinate(consequent, logic) if consequent else None
     coord_other = coordinate(other) if other else None
 
     specification = None
