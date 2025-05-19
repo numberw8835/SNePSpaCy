@@ -1,5 +1,4 @@
 import hashlib
-import spacy
 from spacy.tokens import Token
 from logic_utls.logica import predicate, expression, ForAll, intentionalize
 
@@ -82,6 +81,8 @@ def ref(token: Token, seed: int = 0, length: int = 3) -> str:
         return token.text
     elif is_action(token):
         return "e" + create_var(token.text, seed, length-1)
+    elif is_state(token):
+        return "s" + create_var(token.text, seed, length-1)
     elif is_thing(token):
         return token.text[0] + create_var(token.text, seed, length-1)
     elif is_modifier(token):
@@ -139,13 +140,21 @@ def _get_components(token: Token, negation: bool=False, reference: str=None, var
         elif child.dep_ == "relcl":
             if other:
                 _components.append(predicate("concerns", [true_ref, other]))
+        elif child.dep_ == "prep":
+            _components.extend(get_components(child, child.text, negation, true_ref, var, level))
         elif child.dep_ == "compound":
             _components.append(predicate(child.lemma_, [true_ref]))
+
         elif child.dep_ == "det":
-            pass
+            continue
+        elif child.dep_ == "conj":
+            continue
+        elif child.dep_ == "cc":
+            continue
+        elif child.dep_ == "mark":
+            continue
         else:
-            pass
-            # print(f"Warning: {child.dep_} not implemented")
+            print(f"Warning: {child.dep_} not implemented")
     return _components
 
 def get_components(token: Token, role: str=None, negation: bool=False, reference: str=None, var: str=None, level: int=0) -> list:
@@ -170,8 +179,9 @@ def get_components(token: Token, role: str=None, negation: bool=False, reference
                         predicate(token.lemma_, [ref(token)]),
                         "=>",
                         expression((
-                            coordinate(_get_components(token, negation, reference, ref(token), level)),
-                            "and",
+                            coordinate(_get_components(token, negation, reference, ref(token), level),
+                                        "and" if not negation else "or"),
+                            "and" if not negation else "or",
                             predicate(role, [reference, ref(token)])
                         ))
                     ))
@@ -187,8 +197,9 @@ def get_components(token: Token, role: str=None, negation: bool=False, reference
                         predicate("member", [create_var("thing", level), ref(token)]),
                         "<=>",
                         expression((
-                            coordinate(_get_components(token, negation, reference, create_var("thing", level), level)),
-                            "and",
+                            coordinate(_get_components(token, negation, reference, create_var("thing", level), level),
+                                        "and" if not negation else "or"),
+                            "and" if not negation else "or",
                             predicate(token.lemma_, [create_var("thing", level)])
                         ))
                     ))
@@ -214,8 +225,7 @@ def get_components(token: Token, role: str=None, negation: bool=False, reference
     elif is_action(token):
 
         components.append(predicate(role, [reference, ref(token)]))
-        components.append(predicate(token.lemma_, [ref(token)])) 
-        components.extend(main_snepslog(token))
+        components.append(main_snepslog(token))
 
     elif is_modifier(token):
 
@@ -229,49 +239,60 @@ def get_components(token: Token, role: str=None, negation: bool=False, reference
         
         if skip:
             combination = []
-            combination.extend(get_components(token, token.text, negation, reference, var, level))
-            combination.extend(get_components(token, role, negation, reference, var, level))
+            combination.extend(get_components(skip, token.text, negation, reference, var, level))
+            combination.extend(get_components(skip, role, negation, reference, var, level))
             components.extend(set(combination))
         
     else:
         raise Exception(f"({token}, {token.pos_}) Is an unknown token type, please account for it")
     
-    if conj := get_dependant(token, "conj"):
-        components.extend(get_components(conj, role, negation, reference, var, level+1))
+    conjs = [child for child in token.children if child.dep_ == "conj"]
+    if conjs:
+        for conj in conjs:
+            components.extend(get_components(conj, role, negation, reference, var, level+1))
 
     return components
-         
 
-#TODO: Handle the children, nsubj, dobj, and so on...
+#TODO: Handle the negation 
 def main_snepslog(token: Token) -> expression:
 
     if token is None:
         raise Exception("No token provided")
     
     seed = 0
+    name = token.lemma_ if is_action(token) else "state_of_being"
     negation = is_not(token)
-    result = []
+    result = [predicate(name, [ref(token)])]
 
     match token.pos_:
         case "VERB" | "AUX":
             for child in token.children:
-                match child.dep_:
-                    case "nsubj":
-                        result.extend(get_components(child, "agent", negation, ref(token), None, seed))
-                        seed += len(result)
-                    case "dobj":
-                        result.extend(get_components(child, "object", negation, ref(token), None, seed))
-                        seed += len(result)
-                    case "nsubjpass":
-                        result.extend(get_components(child, "object", negation, ref(token), None, seed))
-                        seed += len(result)
-                    case "agent":
-                        result.extend(get_components(child, "agent", negation, ref(token), None, seed))
-                        seed += len(result)
-                    case "dative":
-                        result.extend(get_components(child, "recipient", negation, ref(token), None, seed))
-                        seed += len(result)
-                    case "prep":
-                        result.extend(get_components(child, child.text, negation, ref(token), None, seed))
-                        seed += len(result)
-            return(intentionalize(coordinate(result)))
+                roles = {
+                    "nsubj": "agent",
+                    "dobj": "object",
+                    "nsubjpass": "object",
+                    "agent": "agent",
+                    "dative": "recipient",
+                    "prep": child.text,
+                    "xcomp": "concerns",
+                    "ccomp": "concerns",
+                    "advcl": "cause",
+                    "acomp": "content",
+                    "attr": "attribute",
+                }
+                if child.dep_ in roles:
+                    result.extend(get_components(child, roles[child.dep_], negation, ref(token), None, seed))
+                    seed += len(result)
+                    
+            result = intentionalize(coordinate(result), negation)
+            for quant in result.quantifiers:
+
+                if isinstance(quant, ForAll):
+                    if not negation:
+                        quant.skolemize_arg(ref(token), quant.variables)
+                    else:
+                        if isinstance(quant.formula, expression) and quant.formula.operator == "=>":
+                            quant.variables.append(ref(token))
+                            if hasattr(quant.formula.operant_2, "negate"):
+                                quant.formula.operant_2 = quant.formula.operant_2.negate()
+            return result
