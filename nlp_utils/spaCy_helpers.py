@@ -130,6 +130,7 @@ def _get_components(token: Token, negation: bool=False, reference: str=None, var
     if token is None:
         return _components
     true_ref = var if var else ref(token)
+
     for child in token.children:
         if child.dep_ == "amod":
             _components.append(predicate(child.lemma_, [true_ref]))
@@ -267,13 +268,13 @@ def main_snepslog(token: Token) -> expression:
 
     if token is None:
         raise Exception("No token provided")
-    
     seed = 0
-    name = token.lemma_ if is_action(token) or is_particle(token) else "state_of_being"
+    name = token.lemma_ if is_action(token) or is_particle(token) else "state"
     negation = is_not(token)
     result = [predicate(name, [ref(token)])]
     conjunct = None
     connective = None
+    extra =[]
 
     for child in token.children:
         
@@ -285,18 +286,28 @@ def main_snepslog(token: Token) -> expression:
             "dative": "recipient",
             "prep": child.text,
             "xcomp": "concerns",
+            "npadvmod": "time",
             "ccomp": "concerns",
             "advcl": "cause",
             "acomp": "content",
             "attr": "attribute",
             "pobj": "object",
-            
         }
 
         if child.dep_ in roles:
+            
+            if child.dep_ in ["nsubjpass", "agent"]:
+                extra.append(predicate("culminate", [ref(token), "PAST"]))
+            elif token.tag_ == "VBG":
+                extra.append(predicate("culminate", [ref(token), "PRESENT"]))
+            elif child.dep_ == "aux" and child.text.lower() == "will":
+                extra.append(predicate("culminate", [ref(token), "FUTURE"]))
+
             result.extend(get_components(child, roles[child.dep_], negation, ref(token), None, seed))
             seed += len(result)
         elif child.dep_ in ["amod", "advmod"]:
+            if not list(child.children):
+                result.append(predicate(child.lemma_, [ref(token)]))
             result.extend(_get_components(child, negation, None, ref(token), seed))
         elif child.dep_ == "conj":
             conjunct = main_snepslog(child)
