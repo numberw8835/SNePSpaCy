@@ -315,7 +315,7 @@ def main_snepslog(token: Token) -> expression:
             conjunct = main_snepslog(child)
         elif child.dep_ == "cc":
             connective = child.text
-            
+    result.extend(set(extra))
     result = intentionalize(coordinate(result), negation)
     for quant in result.quantifiers:
 
