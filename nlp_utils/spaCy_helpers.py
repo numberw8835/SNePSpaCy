@@ -281,7 +281,7 @@ def main_snepslog(token: Token) -> expression:
     for child in token.children:
         
         roles = {
-            "nsubj": "agent",
+            "nsubj": "agent" if is_action(token) else "reference",
             "dobj": "object",
             "nsubjpass": "object",
             "agent": "agent",
