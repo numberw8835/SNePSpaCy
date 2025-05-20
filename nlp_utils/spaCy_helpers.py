@@ -92,11 +92,14 @@ def ref(token: Token, seed: int = 0, length: int = 3) -> str:
     elif is_num(token):
         return token.text
     elif is_pron(token):
-        return ref(token.head.head)
+        if token.head.head.pos_ in ["NOUN", "PROPN"]:
+            return ref(token.head.head)
+        else:
+            return token.lemma_.lower()[0] + create_var(token.lemma_.lower(), seed, length-1)
     elif is_particle(token):
-        raise Exception(f"({token}) Not direct reference")
+        return "p" + create_var(token.text, seed, length-1)
     else:
-        raise Exception(f"({token}) Is an unknown token type")
+        raise Exception(f"({token}, {token.pos_}) Is an unknown token type")
 
 def get_actors(token: Token) -> list:
     """Returns a list of actors of the given token"""
@@ -245,7 +248,10 @@ def get_components(token: Token, role: str=None, negation: bool=False, reference
             combination.extend(get_components(skip, token.text, negation, reference, var, level))
             combination.extend(get_components(skip, role, negation, reference, var, level))
             components.extend(set(combination))
-        
+    elif token.pos_ in ["SCONJ"]:
+        skip = next((child for child in token.children), True)
+        if skip:
+            components.extend(get_components(skip, token.text, negation, reference, var, level))    
     else:
         raise Exception(f"({token}, {token.pos_}) Is an unknown token type, please account for it")
     
@@ -263,57 +269,57 @@ def main_snepslog(token: Token) -> expression:
         raise Exception("No token provided")
     
     seed = 0
-    name = token.lemma_ if is_action(token) else "state_of_being"
+    name = token.lemma_ if is_action(token) or is_particle(token) else "state_of_being"
     negation = is_not(token)
     result = [predicate(name, [ref(token)])]
     conjunct = None
     connective = None
 
-    match token.pos_:
-        case "VERB" | "AUX":
-            for child in token.children:
-                
-                roles = {
-                    "nsubj": "agent",
-                    "dobj": "object",
-                    "nsubjpass": "object",
-                    "agent": "agent",
-                    "dative": "recipient",
-                    "prep": child.text,
-                    "xcomp": "concerns",
-                    "ccomp": "concerns",
-                    "advcl": "cause",
-                    "acomp": "content",
-                    "attr": "attribute",
-                }
+    for child in token.children:
+        
+        roles = {
+            "nsubj": "agent",
+            "dobj": "object",
+            "nsubjpass": "object",
+            "agent": "agent",
+            "dative": "recipient",
+            "prep": child.text,
+            "xcomp": "concerns",
+            "ccomp": "concerns",
+            "advcl": "cause",
+            "acomp": "content",
+            "attr": "attribute",
+            "pobj": "object",
+            
+        }
 
-                if child.dep_ in roles:
-                    result.extend(get_components(child, roles[child.dep_], negation, ref(token), None, seed))
-                    seed += len(result)
-                elif child.dep_ in ["amod", "advmod"]:
-                    result.extend(_get_components(child, negation, None, ref(token), seed))
-                elif child.dep_ == "conj":
-                    conjunct = main_snepslog(child)
-                elif child.dep_ == "cc":
-                    connective = child.text
-                    
-            result = intentionalize(coordinate(result), negation)
-            for quant in result.quantifiers:
+        if child.dep_ in roles:
+            result.extend(get_components(child, roles[child.dep_], negation, ref(token), None, seed))
+            seed += len(result)
+        elif child.dep_ in ["amod", "advmod"]:
+            result.extend(_get_components(child, negation, None, ref(token), seed))
+        elif child.dep_ == "conj":
+            conjunct = main_snepslog(child)
+        elif child.dep_ == "cc":
+            connective = child.text
+            
+    result = intentionalize(coordinate(result), negation)
+    for quant in result.quantifiers:
 
-                if isinstance(quant, ForAll):
-                    if not negation:
-                        quant.skolemize_arg(ref(token), quant.variables)
-                    else:
-                        if isinstance(quant.formula, expression) and quant.formula.operator == "=>":
-                            quant.variables.append(ref(token))
-                            if hasattr(quant.formula.operant_2, "negate"):
-                                quant.formula.operant_2 = quant.formula.operant_2.negate()
-            if conjunct:
-                result = expression((result, connective, conjunct))
-            return result 
+        if isinstance(quant, ForAll):
+            if not negation:
+                quant.skolemize_arg(ref(token), quant.variables)
+            else:
+                if isinstance(quant.formula, expression) and quant.formula.operator == "=>":
+                    quant.variables.append(ref(token))
+                    if hasattr(quant.formula.operant_2, "negate"):
+                        quant.formula.operant_2 = quant.formula.operant_2.negate()
+    if conjunct:
+        result = expression((result, connective, conjunct))
+    return result 
 
 ## --- TESTING --- ###
 # nlp = spacy.load("en_core_web_trf")
-# doc = nlp("the golfer who scored 86, won the tournament")
+# doc = nlp("All boys like all dogs")
 # root = get_root(doc)
 # print(main_snepslog(root))
