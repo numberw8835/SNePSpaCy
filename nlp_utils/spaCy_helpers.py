@@ -77,7 +77,7 @@ def create_var(string: str, seed: int = 0, length: int = 3) -> str:
     hex_dig = hash_object.hexdigest()
     return hex_dig[:length]
 
-def ref(token: Token, seed: int = 0, length: int = 3) -> str:
+def ref(token: Token, seed: int = 0, length: int = 5) -> str:
     """Returns a reference var to the given token"""
     if is_distinct(token):
         return token.text
