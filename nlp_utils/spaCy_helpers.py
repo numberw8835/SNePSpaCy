@@ -142,11 +142,11 @@ def _get_components(token: Token, negation: bool=False, reference: str=None, var
         elif child.dep_ == "acl":
             other = main_snepslog(child)
             if other:
-                _components.append(predicate("concerns", [true_ref, other]))
+                _components.append(predicate("concerns", [true_ref, f"({other})"]))
         elif child.dep_ == "relcl":
             other = main_snepslog(child)
             if other:
-                _components.append(predicate("concerns", [true_ref, other]))
+                _components.append(predicate("concerns", [true_ref, f"({other})"]))
         elif child.dep_ == "prep":
             _components.extend(get_components(child, child.text, negation, true_ref, var, level))
         elif child.dep_ == "compound":
@@ -249,6 +249,7 @@ def get_components(token: Token, role: str=None, negation: bool=False, reference
             combination.extend(get_components(skip, token.text, negation, reference, var, level))
             combination.extend(get_components(skip, role, negation, reference, var, level))
             components.extend(set(combination))
+
     elif token.pos_ in ["SCONJ"]:
         skip = next((child for child in token.children), True)
         if skip:
@@ -257,6 +258,7 @@ def get_components(token: Token, role: str=None, negation: bool=False, reference
         raise Exception(f"({token}, {token.pos_}) Is an unknown token type, please account for it")
     
     conjs = [child for child in token.children if child.dep_ == "conj"]
+
     if conjs:
         for conj in conjs:
             components.extend(get_components(conj, role, negation, reference, var, level+1))
