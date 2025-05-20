@@ -94,7 +94,11 @@ def console(api_mode):
                 else:
                     click.echo(f"\n\t<API OFF> 'clearkb' command skipped.\n")
 
-            elif user_input_lower.startswith("ask "):
+            # Fixed section for 'ask' command
+            elif user_input_lower == "ask": # Handles 'ask' typed alone
+                click.echo(f"\n\t<!> 'ask' command requires a query. Example: ask member(Fido, Dog)\n")
+
+            elif user_input_lower.startswith("ask "): # Handles 'ask ' followed by a query or nothing
                 query = user_input_trimmed[4:].strip()
                 if query:
                     if api_mode == 'on':
@@ -113,7 +117,7 @@ def console(api_mode):
                             click.echo(f"\n\t<!> Unexpected error during 'ask': {e}\n")
                     else:
                         click.echo(f"\n\t<API OFF> 'ask {query}' command skipped. Parsed query would be: {query}\n")
-                else:
+                else: # Handles 'ask ' followed by only spaces
                     click.echo(f"\n\t<!> 'ask' command requires a query. Example: ask member(Fido, Dog)\n")
 
             elif user_input_lower == "list-wffs" or user_input_lower == "list wffs":
@@ -140,7 +144,7 @@ def console(api_mode):
                     results_str = engine.transcribe(user_input_trimmed) # Transcription always happens
 
                     if not results_str:
-                        click.echo("<?> Input is empty or transcription failed.")
+                        click.echo("\n\t<?> Input is empty or transcription failed.\n")
                         continue
                     
                     click.echo(f"\n\t<T> Transcribed/Parsed: {results_str}\n") # Always show transcribed/parsed
@@ -148,13 +152,13 @@ def console(api_mode):
                     if api_mode == 'on':
                         try:
                             api.inform(results_str)
-                            click.echo(f"\t<I> Informed SNePS with: {results_str}\n")
+                            click.echo(f"\n\t<I> Informed SNePS with: {results_str}\n")
                         except SnepsSyntaxError as e:
-                            click.echo(f"\t<!> Syntax Error informing '{results_str}': {e}\n")
+                            click.echo(f"\n\t<!> Syntax Error informing '{results_str}': {e}\n")
                         except SnepsApiError as e:
-                            click.echo(f"\t<!> API Error informing '{results_str}': {e}\n")
+                            click.echo(f"\n\t<!> API Error informing '{results_str}': {e}\n")
                         except Exception as e:
-                            click.echo(f"\t<!> Unexpected error informing '{results_str}': {e}\n")
+                            click.echo(f"\n\t<!> Unexpected error informing '{results_str}': {e}\n")
                     else:
                         click.echo(f"\t<API OFF> SNePS not informed.\n")
 
@@ -163,7 +167,7 @@ def console(api_mode):
 
     except SnepsApiError as e:
         if api_mode == 'on': # Only relevant if we tried to use the API
-             click.echo(f"[!!] A critical SNePS API error occurred: {e}")
+            click.echo(f"[!!] A critical SNePS API error occurred: {e}")
     except Exception as e:
         click.echo(f"[!!] An unexpected critical error occurred: {e}")
     finally:
@@ -171,7 +175,7 @@ def console(api_mode):
             api.terminate()
             click.echo("SNePS API terminated.")
         elif api_mode == 'on' and hasattr(api, 'process'):
-             click.echo("SNePS API was not running or already terminated (when trying to terminate).")
+            click.echo("SNePS API was not running or already terminated (when trying to terminate).")
 
 if __name__ == '__main__':
     console()
