@@ -515,7 +515,7 @@ def intentionalize(formula: expression, negation: bool = False) -> expression:
 
     specification = None
     if coord_antecedent and coord_consequent:
-        specification = expression((coord_antecedent, "=>", coord_consequent))
+        specification = expression((coord_antecedent, "=>", coord_consequent), wrap=True)
     elif coord_consequent: # If only consequent
         specification = coord_consequent
     elif coord_antecedent: # If only antecedent
