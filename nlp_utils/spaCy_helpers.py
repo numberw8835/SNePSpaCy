@@ -296,15 +296,14 @@ def main_snepslog(token: Token) -> expression:
             "pobj": "object",
         }
 
-        if child.dep_ in roles:
-            
-            if child.dep_ in ["nsubjpass", "agent"]:
-                extra.append(predicate("culminate", [ref(token), "PAST"]))
-            elif token.tag_ == "VBG":
-                extra.append(predicate("culminate", [ref(token), "PRESENT"]))
-            elif child.dep_ == "aux" and child.text.lower() == "will":
+        if child.dep_ in ["nsubjpass", "agent"]:
+            extra.append(predicate("culminate", [ref(token), "PAST"]))
+        elif token.tag_ == "VBG":
+            extra.append(predicate("culminate", [ref(token), "PRESENT"]))
+        elif child.dep_ == "aux" and child.text.lower() == "will":
                 extra.append(predicate("culminate", [ref(token), "FUTURE"]))
-
+                
+        if child.dep_ in roles:
             result.extend(get_components(child, roles[child.dep_], negation, ref(token), None, seed))
             seed += len(result)
         elif child.dep_ in ["amod", "advmod"]:
@@ -315,6 +314,7 @@ def main_snepslog(token: Token) -> expression:
             conjunct = main_snepslog(child)
         elif child.dep_ == "cc":
             connective = child.text
+
     result.extend(set(extra))
     result = intentionalize(coordinate(result), negation)
     for quant in result.quantifiers:
