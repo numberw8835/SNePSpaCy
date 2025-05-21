@@ -317,16 +317,19 @@ def main_snepslog(token: Token) -> expression:
 
     result.extend(set(extra))
     result = intentionalize(coordinate(result), negation)
-    for quant in result.quantifiers:
+    if list(result.quantifiers):
+        for quant in result.quantifiers:
 
-        if isinstance(quant, ForAll):
-            if not negation:
-                quant.skolemize_arg(ref(token), quant.variables)
-            else:
-                if isinstance(quant.formula, expression) and quant.formula.operator == "=>":
-                    quant.variables.append(ref(token))
-                    if hasattr(quant.formula.operant_2, "negate"):
-                        quant.formula.operant_2 = quant.formula.operant_2.negate()
+            if isinstance(quant, ForAll):
+                if not negation:
+                    quant.skolemize_arg(ref(token), quant.variables)
+                else:
+                    if isinstance(quant.formula, expression) and quant.formula.operator == "=>":
+                        quant.variables.append(ref(token))
+                        if hasattr(quant.formula.operant_2, "negate"):
+                            quant.formula.operant_2 = quant.formula.operant_2.negate()
+    else:
+        result = result.negate()
     if conjunct:
         result = expression((result, connective, conjunct))
     return result
