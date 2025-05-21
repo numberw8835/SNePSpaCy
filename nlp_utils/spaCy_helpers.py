@@ -132,6 +132,9 @@ def _get_components(token: Token, negation: bool=False, reference: str=None, var
     for child in token.children:
         if child.dep_ == "amod":
             _components.append(predicate(child.lemma_, [true_ref]))
+            other = _get_components(child, negation, reference, var, level)
+            if other:
+                _components.extend(other)
         elif child.dep_ == "advmod":
             _components.append(predicate(child.lemma_, [true_ref, token.lemma_]))
             other = _get_components(child, negation, reference, var, level)
@@ -316,7 +319,7 @@ def main_snepslog(token: Token) -> expression:
             connective = child.text
 
     result.extend(set(extra))
-    result = intentionalize(coordinate(result), negation)
+    result = intentionalize(coordinate(result ,"or" if negation else "and"), negation)
     if list(result.quantifiers):
         for quant in result.quantifiers:
 
@@ -329,7 +332,7 @@ def main_snepslog(token: Token) -> expression:
                         if hasattr(quant.formula.operant_2, "negate"):
                             quant.formula.operant_2 = quant.formula.operant_2.negate()
     else:
-        result = result.negate()
+        result = result.negate() if negation else result
     if conjunct:
         result = expression((result, connective, conjunct))
     return result
