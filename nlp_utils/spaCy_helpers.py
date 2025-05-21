@@ -1,7 +1,5 @@
 import hashlib
 from spacy.tokens import Token
-# import spacy
-# from ..logic_utls.logica import predicate, expression, ForAll, intentionalize
 from logic_utls.logica import predicate, expression, ForAll, intentionalize
 
 def get_root(sentence: list) -> Token:
@@ -70,7 +68,7 @@ def is_not(token: Token) -> bool:
         return True
     return any(child.dep_ == "neg" or child.lemma_.lower() in ["not", "no", "never"] for child in token.children)
 
-def create_var(string: str, seed: int = 0, length: int = 3) -> str:
+def create_var(string: str, seed: int = 0, length: int = 5) -> str:
     """Creates a SHA-HASH of the given string with the given seed and length"""
     string = string + str(seed)
     hash_object = hashlib.sha256(string.encode())
@@ -161,7 +159,7 @@ def _get_components(token: Token, negation: bool=False, reference: str=None, var
         elif child.dep_ == "mark":
             continue
         else:
-            print(f"Warning: {child.dep_} not implemented")
+            print(f"Warning: {child.dep_} not implemented BASE_2")
     return _components
 
 def get_components(token: Token, role: str=None, negation: bool=False, reference: str=None, var: str=None, level: int=0) -> list:
@@ -255,7 +253,8 @@ def get_components(token: Token, role: str=None, negation: bool=False, reference
         if skip:
             components.extend(get_components(skip, token.text, negation, reference, var, level))    
     else:
-        raise Exception(f"({token}, {token.pos_}) Is an unknown token type, please account for it")
+        # raise Exception(f"({token}, {token.pos_}) Is an unknown token type, please account for it")
+        print(f"Warning: ({token}, {token.pos_}) Is an unknown BASE_1 token type, please account for it")
     
     conjs = [child for child in token.children if child.dep_ == "conj"]
 
@@ -290,6 +289,7 @@ def main_snepslog(token: Token) -> expression:
             "xcomp": "concerns",
             "npadvmod": "time",
             "ccomp": "concerns",
+            "dep": "dependant",
             "advcl": "cause",
             "acomp": "content",
             "attr": "attribute",
@@ -329,10 +329,4 @@ def main_snepslog(token: Token) -> expression:
                         quant.formula.operant_2 = quant.formula.operant_2.negate()
     if conjunct:
         result = expression((result, connective, conjunct))
-    return result 
-
-## --- TESTING --- ###
-# nlp = spacy.load("en_core_web_trf")
-# doc = nlp("All boys like all dogs")
-# root = get_root(doc)
-# print(main_snepslog(root))
+    return result
