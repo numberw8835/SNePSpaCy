@@ -319,13 +319,21 @@ def main_snepslog(token: Token) -> expression:
             connective = child.text
 
     result.extend(set(extra))
-    result = intentionalize(coordinate(result ,"or" if negation else "and"), negation)
+
+    # I have no idea how does it fix it, but it does.
+    logic = "or"
+    for logica in result:
+        if isinstance(logica, ForAll):
+            logic = "and"
+    
+    result = intentionalize(coordinate(result, logic), negation)
+
     if list(result.quantifiers):
         for quant in result.quantifiers:
 
             if isinstance(quant, ForAll):
                 if not negation:
-                    quant.skolemize_arg(ref(token), quant.variables)
+                    quant.skolemize_arg(ref(token), [var for var in set(quant.variables)])
                 else:
                     if isinstance(quant.formula, expression) and quant.formula.operator == "=>":
                         quant.variables.append(ref(token))

@@ -509,9 +509,9 @@ def intentionalize(formula: expression, negation: bool = False) -> expression:
     
     # Coordinate returns expression or None
     logic = "and" if not negation else "or"
-    coord_antecedent = coordinate(antecedent) if antecedent else None
-    coord_consequent = coordinate(consequent, logic) if consequent else None
-    coord_other = coordinate(other) if other else None
+    coord_antecedent = coordinate([ant for ant in set(antecedent)]) if antecedent else None
+    coord_consequent = coordinate([con for con in set(consequent)], logic) if consequent else None
+    coord_other = coordinate([oth for oth in set(other)]) if other else None
 
     specification = None
     if coord_antecedent and coord_consequent:
@@ -525,7 +525,7 @@ def intentionalize(formula: expression, negation: bool = False) -> expression:
     main_forall_expr = None
     # Ensure vars_collected is not empty and specification is not None
     if vars_collected and specification:
-        main_forall_expr = ForAll(vars_collected, specification)
+        main_forall_expr = ForAll([var for var in set(vars_collected)], specification)
     elif specification: # No universal vars collected, but there's a specification
          main_forall_expr = specification
 
@@ -540,4 +540,4 @@ def intentionalize(formula: expression, negation: bool = False) -> expression:
     elif coord_other:
         return coord_other if isinstance(coord_other, expression) else expression(coord_other)
 
-    return formula # Fallback
+    return formula  # Fallback
