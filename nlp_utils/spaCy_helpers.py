@@ -148,6 +148,10 @@ def _get_components(token: Token, negation: bool=False, reference: str=None, var
             other = main_snepslog(child)
             if other:
                 _components.append(predicate("concerns", [true_ref, f"({other})"]))
+        elif child.dep_ == "xcomp":
+            other = main_snepslog(child)
+            if other:
+                _components.append(predicate("concerns", [true_ref, f"({other})"]))
         elif child.dep_ == "prep":
             _components.extend(get_components(child, child.text, negation, true_ref, var, level))
         elif child.dep_ == "compound":
@@ -320,8 +324,8 @@ def main_snepslog(token: Token) -> expression:
 
     result.extend(set(extra))
 
-    # I have no idea how does it fix it, but it does.
-    logic = "or"
+    #TODO: Fix the logic of the damn thing 
+    logic = "or" if negation else "and"
     for logica in result:
         if isinstance(logica, ForAll):
             logic = "and"
