@@ -324,7 +324,6 @@ def main_snepslog(token: Token) -> expression:
 
     result.extend(set(extra))
 
-    #TODO: Fix the logic of the damn thing 
     logic = "or" if negation else "and"
     for logica in result:
         if isinstance(logica, ForAll):
