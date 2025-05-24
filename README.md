@@ -4,14 +4,14 @@ This project provides a command-line interface and a Python API to interact with
 
 ## 📜 Table of Contents
 
-* [Description](https://github.com/numberw8835/SNEPSLOG_NL_INTERFACE/edit/main/README.md#description-)
-* [Requirements](https://github.com/numberw8835/SNEPSLOG_NL_INTERFACE/edit/main/README.md#requirements-%EF%B8%8F)
-* [Installation](https://github.com/numberw8835/SNEPSLOG_NL_INTERFACE/edit/main/README.md#installation-%EF%B8%8F)
-* [Usage](https://github.com/numberw8835/SNEPSLOG_NL_INTERFACE/edit/main/README.md#usage-)
-    * [Command-Line Interface (CLI)](https://github.com/numberw8835/SNEPSLOG_NL_INTERFACE/edit/main/README.md#command-line-interface-cli-%EF%B8%8F)
-    * [Direct Access with `sneps_api.py`](https://github.com/numberw8835/SNEPSLOG_NL_INTERFACE/edit/main/README.md#direct-access-with-sneps_apipy-)
-* [Core Components](https://github.com/numberw8835/SNEPSLOG_NL_INTERFACE/edit/main/README.md#direct-access-with-sneps_apipy-)
-* [Intellectual Property](https://github.com/numberw8835/SNEPSLOG_NL_INTERFACE/edit/main/README.md#direct-access-with-sneps_apipy-)
+- [Description 📝](#description-)
+- [Requirements ⚙️](#requirements-)
+- [Installation 🛠️](#installation-)
+- [Usage 🚀](#usage-)
+  - [Command-Line Interface (CLI) ⌨️](#command-line-interface-cli-)
+  - [Direct Access with `sneps_api.py`](#direct-access-with-snepsapipy)
+- [Core Components 🔩](#core-components-)
+- [Intellectual Property ©™️](#intellectual-property-)
 
 ## Description 📝
 
