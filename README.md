@@ -41,3 +41,7 @@
     * For low-level SNePS control, import and use `sneps_api.py` in your Python scripts.
     * It handles SNePS process spawning and communication via `pexpect`.
     * Perfect for automation or custom integrations! 🤖
+
+### Intellectual Property
+
+SNePS is a creation of the SNePS Research Group. All intellectual rights and copyrights pertaining to the SNePS system belong to the SNePS Research Group and the SNePS foundation. We extend our sincere gratitude to the SNePS foundation for their invaluable contribution to the field of knowledge representation and reasoning.
