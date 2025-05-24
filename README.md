@@ -5,13 +5,13 @@ This project provides a command-line interface and a Python API to interact with
 ## 📜 Table of Contents
 
 - [Description 📝](#description-)
-- [Requirements ⚙️](#requirements-)
-- [Installation 🛠️](#installation-)
+- [Requirements ⚙️](#requirements-%EF%B8%8F)
+- [Installation 🛠️](#installation-%EF%B8%8F)
 - [Usage 🚀](#usage-)
-  - [Command-Line Interface (CLI) ⌨️](#command-line-interface-cli-)
-  - [Direct Access with `sneps_api.py`](#direct-access-with-snepsapipy)
+  - [Command-Line Interface (CLI) ⌨️](#command-line-interface-cli-%EF%B8%8F)
+  - [Direct Access with `sneps_api.py`](#direct-access-with-sneps_apipy-)
 - [Core Components 🔩](#core-components-)
-- [Intellectual Property ©™️](#intellectual-property-)
+- [Intellectual Property ©™️](#intellectual-property-%EF%B8%8F)
 
 ## Description 📝
 
