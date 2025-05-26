@@ -248,12 +248,8 @@ def get_components(token: Token, role: str=None, negation: bool=False, reference
     elif is_particle(token):
 
         skip = next((child for child in token.children), True)
-        
         if skip:
-            combination = []
-            combination.extend(get_components(skip, token.text, negation, reference, var, level))
-            combination.extend(get_components(skip, role, negation, reference, var, level))
-            components.extend(set(combination))
+            components.extend(get_components(skip, role, negation, reference, var, level))
 
     elif token.pos_ in ["SCONJ"]:
         skip = next((child for child in token.children), True)
