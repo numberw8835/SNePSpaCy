@@ -55,7 +55,7 @@ def is_many(token: Token) -> bool:
     return (
         (token.tag_ in ["NNS", "NNPS"]) or 
         (any(child.lemma_.lower() in ["all", "forall", "every", "each"] for child in token.children))
-        ) and not (any(child.lemma_.lower() in ["some", "many", "few", "the"] for child in token.children))
+    ) and not (any(child.lemma_.lower() in ["some", "many", "few", "the"] for child in token.children))
 
 def is_group(token: Token) -> bool:
     """Checks whether the token is a group of items"""
