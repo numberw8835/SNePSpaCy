@@ -55,9 +55,9 @@ def console(api_mode):
             click.echo("SNePS API mode is OFF. API will not be initialized or called.")
 
         click.echo("""
-┏━┓┏┓╻┏━╸┏━┓┏━┓┏━┓┏━╸╻ ╻
-┗━┓┃┗┫┣╸ ┣━┛┗━┓┣━┫┃  ┗┳┛
-┗━┛╹ ╹┗━╸╹  ┗━┛╹ ╹┗━╸ ╹ 
+┏━┓┏┓╻┏━╸┏━┓┏━┓┏━┓┏━┓┏━╸╻ ╻
+┗━┓┃┗┫┣╸ ┣━┛┗━┓┣━┛┣━┫┃  ┗┳┛
+┗━┛╹ ╹┗━╸╹  ┗━┛╹  ╹ ╹┗━╸ ╹ 
         """)
         click.echo(f"SNePS console started. API Mode: {api_mode.upper()}. Type 'exit' or 'quit' to leave.")
         click.echo("Commands: ask <query>, list-wffs, clearkb, or (Natural Language).")
