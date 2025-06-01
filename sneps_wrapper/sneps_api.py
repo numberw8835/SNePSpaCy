@@ -57,7 +57,7 @@ class sneps_api:
                 logging.info(f"Changed directory to {self.sneps_directory}")
 
             # Spawn the SNePS process
-            self.process = pexpect.spawn("rlwrap sh Sneps-2.7.0.sh")
+            self.process = pexpect.spawn("sh Sneps-2.7.0.sh")
             if self.logging_enabled:
                 logging.info("SNePS process spawned.")
 
