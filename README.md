@@ -34,7 +34,7 @@ This system leverages the SNePS knowledge representation and reasoning system to
 1.  Ensure Python 3.11.11 and pip are installed on your system.
 2.  Install the necessary Python packages using the following command:
     ```bash
-    pip install click prompt_toolkit spacy pexpect && python -m spacy download en_core_web_trf
+    pip install click prompt_toolkit spacy pexpect referencing && python -m spacy download en_core_web_trf
     ```
     *(Note: `pexpect` is used by `sneps_api.py` for process interaction)*
 
