@@ -1,6 +1,8 @@
-.venv
+# Virtual Environment
+.venv/
+
+# Python version file
 .python-version
-logic_utls/__pycache__
-nlp_utils/__pycache__
-semantic_parser/__pycache__
-sneps_wrapper/__pycache__
+
+# Python cache
+**/__pycache__/
