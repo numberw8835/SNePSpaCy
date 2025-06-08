@@ -379,7 +379,7 @@ def main_snepslog(token: Token) -> expression:
         elif child.dep_ == "cc":
             connective = child.text
 
-    result.extend(set(extra))
+    result.extend(list(dict.fromkeys(extra)))
     result = intentionalize(coordinate(result))
 
     if list(result.quantifiers):
@@ -387,7 +387,7 @@ def main_snepslog(token: Token) -> expression:
 
             if isinstance(quant, ForAll):
                 if not negation:
-                    quant.skolemize_arg(ref(token), [var for var in set(quant.variables)])
+                    quant.skolemize_arg(ref(token), list(dict.fromkeys(quant.variables)))
                 else:
                     if isinstance(quant.formula, expression) and quant.formula.operator == "=>":
                         quant.variables.append(ref(token))

@@ -1,5 +1,6 @@
 import click
 import os
+import traceback
 # Assuming semantic_parser.core.snepslog is in a location Python can find
 from semantic_parser.core import snepslog
 
@@ -28,8 +29,9 @@ def console(api_mode):
     engine = None
     try:
         engine = snepslog() # Initialize the semantic parser engine
-    except Exception as e:
-        click.echo(f"[!!] Failed to initialize semantic parser engine: {e}")
+    except Exception:
+        click.echo(f"[!!] Failed to initialize semantic parser engine:")
+        traceback.print_exc()
         return
 
     api = sneps_api(enable_logging=False)
@@ -89,8 +91,9 @@ def console(api_mode):
                             click.echo(f"\n\t<!> Failed to clear knowledge base (API returned false).\n")
                     except SnepsApiError as e:
                         click.echo(f"\n\t<!> API Error during 'clearkb': {e}\n")
-                    except Exception as e:
-                        click.echo(f"\n\t<!> Unexpected error during 'clearkb': {e}\n")
+                    except Exception:
+                        click.echo(f"\n\t<!> An unexpected error occurred during 'clearkb':\n")
+                        traceback.print_exc()
                 else:
                     click.echo(f"\n\t<API OFF> 'clearkb' command skipped.\n")
 
@@ -113,8 +116,9 @@ def console(api_mode):
                             click.echo(f"\n\t<!> Syntax Error: {e}\n")
                         except SnepsApiError as e:
                             click.echo(f"\n\t<!> API Error: {e}\n")
-                        except Exception as e:
-                            click.echo(f"\n\t<!> Unexpected error during 'ask': {e}\n")
+                        except Exception:
+                            click.echo(f"\n\t<!> An unexpected error occurred during 'ask':\n")
+                            traceback.print_exc()
                     else:
                         click.echo(f"\n\t<API OFF> 'ask {query}' command skipped. Parsed query would be: {query}\n")
                 else: # Handles 'ask ' followed by only spaces
@@ -131,8 +135,9 @@ def console(api_mode):
                             click.echo(f"\n\t<L> No wffs found in the knowledge base.\n")
                     except SnepsApiError as e:
                         click.echo(f"\n\t<!> API Error during 'list-wffs': {e}\n")
-                    except Exception as e:
-                        click.echo(f"\n\t<!> Unexpected error during 'list-wffs': {e}\n")
+                    except Exception:
+                        click.echo(f"\n\t<!> An unexpected error occurred during 'list-wffs':\n")
+                        traceback.print_exc()
                 else:
                     click.echo(f"\n\t<API OFF> 'list-wffs' command skipped.\n")
 
@@ -157,19 +162,23 @@ def console(api_mode):
                             click.echo(f"\n\t<!> Syntax Error informing '{results_str}': {e}\n")
                         except SnepsApiError as e:
                             click.echo(f"\n\t<!> API Error informing '{results_str}': {e}\n")
-                        except Exception as e:
-                            click.echo(f"\n\t<!> Unexpected error informing '{results_str}': {e}\n")
+                        except Exception:
+                            click.echo(f"\n\t<!> An unexpected error occurred while informing SNePS:\n")
+                            traceback.print_exc()
                     else:
                         click.echo(f"\t<API OFF> SNePS not informed.\n")
 
-                except Exception as e:
-                    click.echo(f"\t<!> Error processing input: {e}")
+                except Exception:
+                    click.echo(f"\t<!> An error occurred processing the input:\n")
+                    traceback.print_exc()
 
     except SnepsApiError as e:
         if api_mode == 'on': # Only relevant if we tried to use the API
             click.echo(f"[!!] A critical SNePS API error occurred: {e}")
-    except Exception as e:
-        click.echo(f"[!!] An unexpected critical error occurred: {e}")
+            traceback.print_exc()
+    except Exception:
+        click.echo(f"[!!] An unexpected critical error occurred:")
+        traceback.print_exc()
     finally:
         if api_mode == 'on' and hasattr(api, 'process') and api.process and api.process.isalive():
             api.terminate()

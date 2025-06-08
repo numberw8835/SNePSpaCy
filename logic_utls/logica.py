@@ -559,16 +559,16 @@ def intentionalize(formula: expression) -> expression:
     
     # Coordinate returns expression or None
     if antecedent:
-        coord_antecedent = coordinate([ant for ant in set(antecedent)])
+        coord_antecedent = coordinate(list(dict.fromkeys(antecedent)))
     else:
         coord_antecedent = None
     
     if consequent:
-        coord_consequent = coordinate([con for con in set(consequent)])
+        coord_consequent = coordinate(list(dict.fromkeys(consequent)))
     else:
         coord_consequent = None
 
-    coord_other = coordinate([oth for oth in set(other)]) if other else None
+    coord_other = coordinate(list(dict.fromkeys(other))) if other else None
 
     specification = None
     if coord_antecedent and coord_consequent:
@@ -582,7 +582,7 @@ def intentionalize(formula: expression) -> expression:
     main_forall_expr = None
     # Ensure vars_collected is not empty and specification is not None
     if vars_collected and specification:
-        main_forall_expr = ForAll([var for var in set(vars_collected)], specification)
+        main_forall_expr = ForAll(list(dict.fromkeys(vars_collected)), specification)
     elif specification: # No universal vars collected, but there's a specification
          main_forall_expr = specification
 
