@@ -465,6 +465,56 @@ class Exists:
     def _get_all_segments(self):
         yield self
 
+class AndOr:
+    def __init__(self, pair: tuple[int, int], expressions: list[expression]):
+        """
+        Initializes the AndOr object.
+
+        Args:
+            pair: A tuple (m, n) where m and n are integers, representing the
+                  minimum and maximum number of expressions that must be true.
+            expressions: A list of 'expression' objects to be evaluated.
+
+        Raises:
+            TypeError: If 'pair' is not a tuple of two integers or if
+                       'expressions' is not a list of 'expression' objects.
+            ValueError: If the integers in 'pair' are not valid (e.g., m > n).
+        """
+        if not (isinstance(pair, tuple) and len(pair) == 2 and
+                isinstance(pair[0], int) and isinstance(pair[1], int)):
+            raise TypeError("The 'pair' argument must be a tuple of two integers.")
+
+        if pair[0] > pair[1]:
+            raise ValueError(f"Invalid pair ({pair[0]}, {pair[1]}): the first element cannot be greater than the second.")
+
+        if not (isinstance(expressions, list) and
+                all(isinstance(expr, expression) for expr in expressions)):
+            raise TypeError("The 'expressions' argument must be a list of expression objects.")
+
+        self.pair = pair
+        self.expressions = expressions
+
+    def __str__(self) -> str:
+        """
+        Returns a string representation of the AndOr object.
+        """
+        expr_strs = [str(expr) for expr in self.expressions]
+        return f"andor({self.pair[0]}, {self.pair[1]}){{{', '.join(expr_strs)}}}"
+    def negate(self):
+        """
+        Returns the logical negation of the AndOr expression.
+        """
+        k = len(self.expressions)
+        m, n = self.pair
+
+        # The new pair (m', n') is (k-n, k-m)
+        negated_pair = (k - n, k - m)
+
+        # Negate each of the sub-expressions
+        negated_expressions = [expr.negate() for expr in self.expressions]
+
+        return AndOr(negated_pair, negated_expressions)
+
 def coordinate(input_list: list, operator: str='and', wrap=False) -> expression: # Renamed input to input_list
     """Returns a coordination of the given input_list"""
     if not input_list:
