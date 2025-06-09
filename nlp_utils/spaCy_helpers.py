@@ -195,12 +195,16 @@ def _get_components(token: Token, reference: str=None, var: str=None, level: int
 
     for child in token.children:
         if child.dep_ == "amod":
-            _components.append(predicate(child.lemma_, [true_ref]))
+            mod = predicate(child.lemma_, [true_ref])
+            mod = mod.negate() if has_dependant(child, "neg") else mod
+            _components.append(mod)
             other = _get_components(child, reference, var, level)
             if other:
                 _components.extend(other)
         elif child.dep_ == "advmod":
-            _components.append(predicate(child.lemma_, [true_ref, token.lemma_]))
+            mod = predicate(child.lemma_, [true_ref, token.lemma_])
+            mod = mod.negate() if has_dependant(child, "neg") else mod
+            _components.append(mod)
             other = _get_components(child, reference, var, level)
             if other:
                 _components.extend(other)
@@ -395,7 +399,8 @@ def main_snepslog(token: Token) -> expression:
                             quant.formula.operant_2 = combine(quant.formula.operant_2, negation)
     else:
         result = combine(result, negation)
-        result = ForAll([ref(token)], result)
+        if negation:
+            result = ForAll([ref(token)], result)
     if conjunct:
         result = expression((result, connective, conjunct))
     return result
