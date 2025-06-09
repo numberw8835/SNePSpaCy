@@ -465,6 +465,56 @@ class Exists:
     def _get_all_segments(self):
         yield self
 
+class AndOr:
+    def __init__(self, pair: tuple[int, int], expressions: list[expression]):
+        """
+        Initializes the AndOr object.
+
+        Args:
+            pair: A tuple (m, n) where m and n are integers, representing the
+                  minimum and maximum number of expressions that must be true.
+            expressions: A list of 'expression' objects to be evaluated.
+
+        Raises:
+            TypeError: If 'pair' is not a tuple of two integers or if
+                       'expressions' is not a list of 'expression' objects.
+            ValueError: If the integers in 'pair' are not valid (e.g., m > n).
+        """
+        if not (isinstance(pair, tuple) and len(pair) == 2 and
+                isinstance(pair[0], int) and isinstance(pair[1], int)):
+            raise TypeError("The 'pair' argument must be a tuple of two integers.")
+
+        if pair[0] > pair[1]:
+            raise ValueError(f"Invalid pair ({pair[0]}, {pair[1]}): the first element cannot be greater than the second.")
+
+        if not (isinstance(expressions, list) and
+                all(isinstance(expr, expression) for expr in expressions)):
+            raise TypeError("The 'expressions' argument must be a list of expression objects.")
+
+        self.pair = pair
+        self.expressions = expressions
+
+    def __str__(self) -> str:
+        """
+        Returns a string representation of the AndOr object.
+        """
+        expr_strs = [str(expr) for expr in self.expressions]
+        return f"andor({self.pair[0]}, {self.pair[1]}){{{', '.join(expr_strs)}}}"
+    def negate(self):
+        """
+        Returns the logical negation of the AndOr expression.
+        """
+        k = len(self.expressions)
+        m, n = self.pair
+
+        # The new pair (m', n') is (k-n, k-m)
+        negated_pair = (k - n, k - m)
+
+        # Negate each of the sub-expressions
+        negated_expressions = [expr.negate() for expr in self.expressions]
+
+        return AndOr(negated_pair, negated_expressions)
+
 def coordinate(input_list: list, operator: str='and', wrap=False) -> expression: # Renamed input to input_list
     """Returns a coordination of the given input_list"""
     if not input_list:
@@ -481,7 +531,7 @@ def coordinate(input_list: list, operator: str='and', wrap=False) -> expression:
             result = expression((result, operator, current_expr), wrap=wrap)
         return result
 
-def intentionalize(formula: expression, negation: bool = False) -> expression:
+def intentionalize(formula: expression) -> expression:
     """Transforms the universal intention of the expression"""
     # Ensure formula.quantifiers is available and produces a list for the check
     all_quantifiers = list(formula.quantifiers) if hasattr(formula, 'quantifiers') and formula.quantifiers is not None else []
@@ -508,10 +558,17 @@ def intentionalize(formula: expression, negation: bool = False) -> expression:
             consequent.append(segment)
     
     # Coordinate returns expression or None
-    logic = "and" if not negation else "or"
-    coord_antecedent = coordinate([ant for ant in set(antecedent)]) if antecedent else None
-    coord_consequent = coordinate([con for con in set(consequent)], logic) if consequent else None
-    coord_other = coordinate([oth for oth in set(other)]) if other else None
+    if antecedent:
+        coord_antecedent = coordinate(list(dict.fromkeys(antecedent)))
+    else:
+        coord_antecedent = None
+    
+    if consequent:
+        coord_consequent = coordinate(list(dict.fromkeys(consequent)))
+    else:
+        coord_consequent = None
+
+    coord_other = coordinate(list(dict.fromkeys(other))) if other else None
 
     specification = None
     if coord_antecedent and coord_consequent:
@@ -525,7 +582,7 @@ def intentionalize(formula: expression, negation: bool = False) -> expression:
     main_forall_expr = None
     # Ensure vars_collected is not empty and specification is not None
     if vars_collected and specification:
-        main_forall_expr = ForAll([var for var in set(vars_collected)], specification)
+        main_forall_expr = ForAll(list(dict.fromkeys(vars_collected)), specification)
     elif specification: # No universal vars collected, but there's a specification
          main_forall_expr = specification
 

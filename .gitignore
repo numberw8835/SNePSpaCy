@@ -1,2 +1,8 @@
-.venv
+# Virtual Environment
+.venv/
+
+# Python version file
 .python-version
+
+# Python cache
+**/__pycache__/
