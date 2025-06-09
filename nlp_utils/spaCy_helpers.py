@@ -332,7 +332,6 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
 
     return components
 
-#TODO: Handle the negation 
 def main_snepslog(token: Token) -> expression:
 
     if token is None:
