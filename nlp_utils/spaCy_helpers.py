@@ -381,16 +381,16 @@ def main_snepslog(token: Token, level: int=0) -> expression:
 
             if isinstance(quant, ForAll):
                 if not negation:
-                    quant.skolemize_arg(ref(token), list(dict.fromkeys(quant.variables)))
+                    quant.skolemize_arg(ref(token, seed=level), list(dict.fromkeys(quant.variables)))
                 else:
                     if isinstance(quant.formula, expression) and quant.formula.operator == "=>":
-                        quant.variables.append(ref(token))
+                        quant.variables.append(ref(token, seed=level))
                         if hasattr(quant.formula.operant_2, "negate") and isinstance(quant.formula.operant_2, expression):
                             quant.formula.operant_2 = combine(quant.formula.operant_2, negation)
     else:
         if negation:
             result = combine(result, negation)
-            result = ForAll([ref(token)], result)
+            result = ForAll([ref(token, seed=level)], result)
     if conjunct:
         result = expression((result, connective, conjunct))
     return result
