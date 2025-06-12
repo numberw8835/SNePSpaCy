@@ -212,8 +212,14 @@ def _get_components(token: Token, reference: str=None, var: str=None, level: int
             _components.extend(get_components(child, child.text, true_ref, var, level, main_level))
         elif child.dep_ == "compound":
             _components.append(predicate(child.lemma_, [true_ref]))
-        elif child.dep_ == "det":
+            other = _get_components(child, reference, var, level, main_level)
+            if other:
+                _components.extend(other)
+        elif child.dep_ == "det": # Potential for change
             continue
+            # _components.append(predicate(child.lemma_, [true_ref]))
+        elif child.dep_ == "nummod":
+            _components.append(predicate("quantity", [child.lemma_, true_ref]))
         elif child.dep_ == "conj":
             continue
         elif child.dep_ == "cc":
@@ -325,7 +331,7 @@ def main_snepslog(token: Token, level: int=0) -> expression:
     if token is None:
         raise Exception("No token provided")
     seed = 0
-    name = token.lemma_ if not is_state(token) else "state"
+    name = token.text if not is_state(token) else "state"
     negation = is_not(token)
     result = [predicate(name, [ref(token, seed=level)])]
     conjunct = None
