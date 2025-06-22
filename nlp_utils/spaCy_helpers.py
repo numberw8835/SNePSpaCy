@@ -300,9 +300,17 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
 
     elif is_modifier(token):
 
-        components.append(predicate(role, [reference, ref(token)]))
-        components.append(predicate(token.text, [ref(token)]))
-        components.extend(_get_components(token, reference, var, level, main_level))
+        if token.tag_ == "JJR":
+            pred = token.text
+            cont = next(next(token.children, None).children, None)
+            pred = pred + "_" + next(token.children, None).text
+            components.append(predicate(role, [reference, ref(token)]))
+            components.append(predicate(pred, [ref(token), cont.text]))
+            components.extend(_get_components(cont, reference, var, level, main_level))
+        else:
+            components.append(predicate(role, [reference, ref(token)]))
+            components.append(predicate(token.text, [ref(token)]))
+            components.extend(_get_components(token, reference, var, level, main_level))
 
     elif is_particle(token):
 
