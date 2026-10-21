@@ -122,10 +122,9 @@ def combine(input_expr: expression, negation: bool = False) -> expression:
     It extracts all predicates from the input expression, ignoring other logical constructs.
 
     If negation is False:
-    - Groups extracted predicates by name.
-    - Combines predicates within the same group using 'or'.
-    - Combines the resulting groups using 'and'.
-    Example: from expression(p(a) and q(c) and p(b)) -> (p(a) or p(b)) and q(c)
+    - Conjoins the extracted predicates in order, dropping exact duplicates. Repeating a
+      predicate name in a statement asserts each instance, so they must not become a disjunction.
+    Example: from expression(p(a) and q(c) and p(b)) -> p(a) and q(c) and p(b)
 
     If negation is True:
     - Groups extracted predicates by name.
@@ -142,6 +141,9 @@ def combine(input_expr: expression, negation: bool = False) -> expression:
 
     if not predicate_list:
         return None
+
+    if not negation:
+        return coordinate(list(dict.fromkeys(p for p in predicate_list if isinstance(p, predicate))), "and")
 
     # Group predicates by their name (e.g., 'agent', 'like')
     groups = defaultdict(list)
