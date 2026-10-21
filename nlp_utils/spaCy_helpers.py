@@ -1,7 +1,37 @@
+import contextlib
+import contextvars
 import hashlib
+import itertools
+import re
+import warnings
 from collections import defaultdict
 from spacy.tokens import Token
-from logic_utls.logica import predicate, expression, ForAll, intentionalize
+from logic_utls.logica import predicate, expression, ForAll, AndEntailment, intentionalize
+
+
+class TranscriptionWarning(UserWarning):
+    """Part of a sentence could not be translated and was left out of the result."""
+
+
+# Identifiers such as car_1, person2 or stop_sign_1: a word (optionally joined with '_') ending in a
+# number. Ordinary alphanumeric words (MP3s, H2O, 1990s) do not match.
+_IDENTIFIER = re.compile(r"[A-Za-z]+(?:_[A-Za-z]+)*_?[0-9]+")
+
+# Number of the sentence being transcribed. It is part of every generated constant, so the
+# states, events and things of one sentence never share a constant with another sentence's.
+# Numbers come from one counter for the whole process, whichever engine transcribes.
+_SENTENCE = contextvars.ContextVar("snepspacy_sentence", default=None)
+_SENTENCE_NUMBERS = itertools.count(1)
+
+
+@contextlib.contextmanager
+def sentence_scope(number=None):
+    """Generate constants for sentence `number` (by default, the next unused one) inside this block."""
+    token = _SENTENCE.set(next(_SENTENCE_NUMBERS) if number is None else number)
+    try:
+        yield
+    finally:
+        _SENTENCE.reset(token)
 
 def get_root(sentence: list) -> Token:
     """Returns the root token"""
@@ -16,8 +46,10 @@ def has_dependant(token: Token, dependency: str) -> bool:
     return any(child.dep_ == dependency for child in token.children)
 
 def is_distinct(token: Token) -> bool:
-    """Checks whether the token is a Proper Noun"""
-    return token.pos_ == "PROPN"
+    """Checks whether the token names an individual: a proper noun or an identifier such as car_1.
+    spaCy tags the same identifier as NOUN, PROPN, NUM or X depending on context, so identifiers
+    are recognised by their form."""
+    return token.pos_ == "PROPN" or bool(_IDENTIFIER.fullmatch(token.text))
 
 def is_action(token: Token) -> bool:
     """Checks whether the token is a Verb"""
@@ -80,18 +112,35 @@ def create_var(string: str, seed: int = 0, length: int = 5) -> str:
     hex_dig = hash_object.hexdigest()
     return hex_dig[:length]
 
-def ref(token: Token, seed: int = 0, length: int = 5) -> str:
-    """Returns a reference var to the given token"""
+def is_discourse_definite(token: Token) -> bool:
+    """A plain definite singular noun ("the cat") that denotes the same individual in every
+    sentence. Modified definites ("the left of car_1") and indefinites are new in each sentence."""
+    return (is_thing(token) and token.tag_ not in ("NNS", "NNPS")
+            and any(c.dep_ == "det" and c.lower_ == "the" for c in token.children)
+            and not any(c.dep_ in ("prep", "relcl", "acl", "amod", "compound", "poss", "nummod")
+                        for c in token.children))
+
+def ref(token: Token, seed: int = 0, length: int = 9) -> str:
+    """Returns a reference var to the given token.
+
+    Names and numbers stand for themselves, and a plain definite noun ("the cat") has one constant
+    per lemma. Every other token gets a constant derived from its text, its position in the
+    sentence and the sentence number, so two occurrences of "is" (or "a car") denote different
+    individuals, within a sentence and across sentences.
+    """
+    key = f"{token.text}|{token.i}|{_SENTENCE.get()}"
+    if is_discourse_definite(token):
+        key = f"the|{token.lemma_.lower()}"
     if is_distinct(token):
         return token.text
     elif is_action(token):
-        return "e" + create_var(token.text, seed, length-1)
+        return "e" + create_var(key, seed, length-1)
     elif is_state(token):
-        return "s" + create_var(token.text, seed, length-1)
+        return "s" + create_var(key, seed, length-1)
     elif is_thing(token):
-        return token.text[0] + create_var(token.text, seed, length-1)
+        return token.text[0] + create_var(key, seed, length-1)
     elif is_modifier(token):
-        return "m" + create_var(token.text, seed, length-1)
+        return "m" + create_var(key, seed, length-1)
     elif is_num(token):
         return token.text
     elif is_pron(token):
@@ -100,7 +149,7 @@ def ref(token: Token, seed: int = 0, length: int = 5) -> str:
         else:
             return token.lemma_.lower()[0] + create_var(token.lemma_.lower(), seed, length-1)
     elif is_particle(token):
-        return "p" + create_var(token.text, seed, length-1)
+        return "p" + create_var(key, seed, length-1)
     else:
         raise Exception(f"({token}, {token.pos_}) Is an unknown token type")
 
@@ -122,10 +171,10 @@ def combine(input_expr: expression, negation: bool = False) -> expression:
     It extracts all predicates from the input expression, ignoring other logical constructs.
 
     If negation is False:
-    - Groups extracted predicates by name.
-    - Combines predicates within the same group using 'or'.
-    - Combines the resulting groups using 'and'.
-    Example: from expression(p(a) and q(c) and p(b)) -> (p(a) or p(b)) and q(c)
+    - Conjoins the expression's top-level parts in order, dropping exact duplicates. Repeating a
+      predicate name in a statement asserts each instance, so they must not become a disjunction;
+      a disjunction the sentence states explicitly ("the cat or the dog") is kept as one part.
+    Example: from expression(p(a) and q(c) and p(b)) -> p(a) and q(c) and p(b)
 
     If negation is True:
     - Groups extracted predicates by name.
@@ -142,6 +191,10 @@ def combine(input_expr: expression, negation: bool = False) -> expression:
 
     if not predicate_list:
         return None
+
+    if not negation:
+        # Conjoin the top-level parts; an explicit disjunction ("the cat or the dog") stays one part.
+        return coordinate(list(dict.fromkeys(input_expr.segments)), "and")
 
     # Group predicates by their name (e.g., 'agent', 'like')
     groups = defaultdict(list)
@@ -187,7 +240,12 @@ def coordinate(input: list, operator: str='and', wrap=False) -> expression:
             result = expression((result, operator, predicate), wrap=wrap)
         return result
 
-def _get_components(token: Token, reference: str=None, var: str=None, level: int=0) -> list:
+def _get_components(token: Token, reference: str=None, var: str=None, level: int=0, inline: bool=False) -> list:
+    """Modifiers of `token` as predicates about it.
+
+    With `inline`, a relative or adjectival clause contributes its own facts rather than a
+    concerns(x, (...)) term, so it can serve as the condition of a rule ("every person that ...").
+    """
     _components = []
     if token is None:
         return _components
@@ -208,20 +266,23 @@ def _get_components(token: Token, reference: str=None, var: str=None, level: int
             other = _get_components(child, reference, var, level)
             if other:
                 _components.extend(other)
-        elif child.dep_ == "acl":
+        elif child.dep_ in ("acl", "relcl"):
             other = main_snepslog(child)
-            if other:
-                _components.append(predicate("concerns", [true_ref, f"({other})"]))
-        elif child.dep_ == "relcl":
-            other = main_snepslog(child)
-            if other:
+            # A negated clause comes back as a quantified formula; it stays a concerns() term.
+            if other and inline and isinstance(other, expression) and not list(other.quantifiers):
+                for segment in other.segments:
+                    if isinstance(segment, expression) and segment.is_binary:
+                        segment.wrap = True  # SNePS rejects "a and b or c" without parentheses
+                    _components.append(segment)
+            elif other:
                 _components.append(predicate("concerns", [true_ref, f"({other})"]))
         elif child.dep_ == "xcomp":
             other = main_snepslog(child)
             if other:
                 _components.append(predicate("concerns", [true_ref, f"({other})"]))
         elif child.dep_ == "prep":
-            _components.extend(get_components(child, child.text, true_ref, var, level))
+            # `var` names this token only; the prepositional object's own modifiers refer to it.
+            _components.extend(get_components(child, child.text, true_ref, None, level))
         elif child.dep_ == "compound":
             _components.append(predicate(child.lemma_, [true_ref]))
         elif child.dep_ == "det":
@@ -233,8 +294,26 @@ def _get_components(token: Token, reference: str=None, var: str=None, level: int
         elif child.dep_ == "mark":
             continue
         else:
-            print(f"Warning: {child.dep_} not implemented BASE_2")
+            warnings.warn(f"dependency '{child.dep_}' of '{token}' is not handled; '{child}' was left out",
+                          TranscriptionWarning, stacklevel=2)
     return _components
+
+def _restrictor_variables(token: Token, restrictor: list) -> list:
+    """Constants that a quantified noun's modifiers introduce (the state of its relative clause,
+    "a car", ...). They must be quantified too, or the rule would only match those exact constants."""
+    used = {arg for item in restrictor for p in item._get_all_predicates() for arg in p.args}
+    variables = []
+    for t in token.subtree:
+        # Names, numbers and definite nouns ("the shelf") stay specific; pronouns refer to the noun.
+        if t is token or is_distinct(t) or is_num(t) or is_pron(t) or is_discourse_definite(t):
+            continue
+        try:
+            constant = ref(t)
+        except Exception:
+            continue
+        if constant in used and constant not in variables:
+            variables.append(constant)
+    return variables
 
 def get_components(token: Token, role: str=None, reference: str=None, var: str=None, level: int=0) -> list:
     """Returns a list of modifiers of the given token"""
@@ -250,18 +329,22 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
     elif is_thing(token):
 
         if is_many(token):
-            
+
+            # "Every person that is in front of a car ...": the noun and everything that restricts
+            # it (relative clauses, prepositional phrases, adjectives) form the rule's condition.
+            variable = ref(token)
+            modifiers = _get_components(token, reference, variable, level, inline=True)
+            # A modifier with its own quantifier ("owner of dogs") stays in the consequent, as
+            # before: nested inside the condition, SNePS does not finish asserting the rule.
+            quantified = [m for m in modifiers if list(m._get_all_quantifiers())]
+            restrictor = [predicate(token.lemma_, [variable])] + [m for m in modifiers if m not in quantified]
             components.append(
                 ForAll(
-                    [ref(token)],
+                    [variable] + _restrictor_variables(token, restrictor),
                     expression((
-                        predicate(token.lemma_, [ref(token)]),
+                        coordinate(restrictor),
                         "=>",
-                        expression((
-                            coordinate(_get_components(token, reference, ref(token), level)),
-                            "and", 
-                            predicate(role, [reference, ref(token)])
-                        ))
+                        coordinate(quantified + [predicate(role, [reference, variable])])
                     ))
                 )
             )
@@ -274,11 +357,12 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
                     expression( (
                         predicate("member", [create_var("thing", level), ref(token)]),
                         "<=>",
+                        # SNePS rejects an unparenthesised conjunction on the right of <=>.
                         expression((
                             coordinate(_get_components(token, reference, create_var("thing", level), level)),
                             "and",
                             predicate(token.lemma_, [create_var("thing", level)])
-                        ))
+                        ), wrap=True)
                     ))
                 )
             )
@@ -312,27 +396,56 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
 
     elif is_particle(token):
 
-        skip = next((child for child in token.children), True)
-        if skip:
+        # Follow the preposition's object. An adverb attached to the preposition ("completely
+        # to the left of") modifies the relation, so it is kept as a modifier of the reference.
+        for child in token.children:
+            if child.dep_ == "advmod":
+                components.append(predicate(child.lemma_, [reference]))
+        skip = next((child for child in token.children if child.dep_ in ("pobj", "pcomp")), None)
+        if skip is None:
+            skip = next((child for child in token.children if child.dep_ != "advmod"), None)
+        if skip is not None:
             components.extend(get_components(skip, role, reference, var, level))
+        else:
+            warnings.warn(f"preposition '{token}' has no object and was left out", TranscriptionWarning, stacklevel=2)
 
     elif token.pos_ in ["SCONJ"]:
-        skip = next((child for child in token.children), True)
-        if skip:
-            components.extend(get_components(skip, token.text, reference, var, level))    
+        skip = next((child for child in token.children), None)
+        if skip is not None:
+            components.extend(get_components(skip, token.text, reference, var, level))
+        else:
+            warnings.warn(f"'{token}' has no clause and was left out", TranscriptionWarning, stacklevel=2)
     else:
-        # raise Exception(f"({token}, {token.pos_}) Is an unknown token type, please account for it")
-        print(f"Warning: ({token}, {token.pos_}) Is an unknown BASE_1 token type, please account for it")
+        warnings.warn(f"'{token}' ({token.pos_}) is not a handled token type and was left out",
+                      TranscriptionWarning, stacklevel=2)
     
     conjs = [child for child in token.children if child.dep_ == "conj"]
 
     if conjs:
-        for conj in conjs:
-            components.extend(get_components(conj, role, reference, var, level+1))
+        alternatives = [get_components(conj, role, reference, var, level+1) for conj in conjs]
+        # spaCy chains a list ("the cat, the dog or the bird") and puts "or" on a later conjunct.
+        if any(c.dep_ == "cc" and c.lower_ == "or" for t in (token, *token.conjuncts) for c in t.children):
+            # "the cat or the dog": one of the alternatives holds, not all of them.
+            options = []
+            for option in [components] + alternatives:
+                if option:
+                    option = coordinate(option)
+                    if option.is_binary:
+                        option.wrap = True  # each alternative in its own parentheses
+                    options.append(option)
+            if len(options) > 1:
+                components = [coordinate(options, "or", wrap=True)]
+        else:
+            for alternative in alternatives:
+                components.extend(alternative)
 
     return components
 
 def main_snepslog(token: Token) -> expression:
+    if _SENTENCE.get() is None:
+        # A new sentence: give it its own number (nested clauses share their sentence's number).
+        with sentence_scope():
+            return main_snepslog(token)
 
     if token is None:
         raise Exception("No token provided")
@@ -392,6 +505,10 @@ def main_snepslog(token: Token) -> expression:
                 if not negation:
                     quant.skolemize_arg(ref(token), list(dict.fromkeys(quant.variables)))
                 else:
+                    if isinstance(quant.formula, AndEntailment):
+                        # &=> cannot carry a negated consequent; fall back to the => form.
+                        quant.formula = expression((coordinate(quant.formula.antecedents), "=>",
+                                                    coordinate(quant.formula.consequents)), wrap=True)
                     if isinstance(quant.formula, expression) and quant.formula.operator == "=>":
                         quant.variables.append(ref(token))
                         if hasattr(quant.formula.operant_2, "negate") and isinstance(quant.formula.operant_2, expression):

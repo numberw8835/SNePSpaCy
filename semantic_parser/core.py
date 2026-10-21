@@ -6,8 +6,9 @@ class snepslog:
     def __init__(self, model="en_core_web_trf"):
         self.model = model
         self.nlp = spacy.load(self.model)
-    
+
     def transcribe(self, passage):
+        # Each call is a new sentence with its own constants (see main_snepslog).
         doc = self.nlp(passage)
         return self._sneps(get_root(doc))
 
