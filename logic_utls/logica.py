@@ -408,6 +408,9 @@ class ForAll:
                 # This ensures skolemization variables are from the correct scope.
                 if form_component.formula:
                     modify_recursive(form_component.formula)
+            elif isinstance(form_component, AndEntailment):
+                for atom in form_component.antecedents + form_component.consequents:
+                    modify_recursive(atom)
 
         if self.formula:
             modify_recursive(self.formula) # Modify self.formula in-place
@@ -464,6 +467,55 @@ class Exists:
 
     def _get_all_segments(self):
         yield self
+
+class AndEntailment:
+    """SNePSLOG and-entailment, {a1, ..., an} &=> {c1, ..., cm}: when all antecedents hold, so do
+    all consequents. This is the rule form SNePS's backward inference handles directly, so rules
+    whose two sides are plain conjunctions of atoms are written this way."""
+
+    def __init__(self, antecedents: list, consequents: list):
+        self.antecedents = list(antecedents)
+        self.consequents = list(consequents)
+
+    def __str__(self):
+        return (f"{{{', '.join(str(a) for a in self.antecedents)}}} &=> "
+                f"{{{', '.join(str(c) for c in self.consequents)}}}")
+
+    def negate(self):
+        raise NotImplementedError("Negation of an and-entailment is not supported.")
+
+    def normalize(self):
+        return copy.deepcopy(self)
+
+    def __eq__(self, other):
+        if not isinstance(other, AndEntailment):
+            return NotImplemented
+        return self.antecedents == other.antecedents and self.consequents == other.consequents
+
+    def __hash__(self):
+        return hash(('&=>', tuple(self.antecedents), tuple(self.consequents)))
+
+    def _get_all_binary_expressions(self):
+        yield from ()
+
+    def _get_all_predicates(self):
+        yield from self.antecedents
+        yield from self.consequents
+
+    def _get_all_quantifiers(self):
+        yield from ()
+
+    def _get_all_segments(self):
+        yield self
+
+
+def _atoms(formula):
+    """The predicates of a conjunction of predicates, or None if it contains anything else."""
+    if formula is None:
+        return None
+    segments = list(formula.segments) if hasattr(formula, 'segments') else [formula]
+    return segments if segments and all(isinstance(s, predicate) for s in segments) else None
+
 
 class AndOr:
     def __init__(self, pair: tuple[int, int], expressions: list[expression]):
@@ -572,7 +624,11 @@ def intentionalize(formula: expression) -> expression:
 
     specification = None
     if coord_antecedent and coord_consequent:
-        specification = expression((coord_antecedent, "=>", coord_consequent), wrap=True)
+        antecedent_atoms, consequent_atoms = _atoms(coord_antecedent), _atoms(coord_consequent)
+        if antecedent_atoms and consequent_atoms:
+            specification = AndEntailment(list(dict.fromkeys(antecedent_atoms)), list(dict.fromkeys(consequent_atoms)))
+        else:
+            specification = expression((coord_antecedent, "=>", coord_consequent), wrap=True)
     elif coord_consequent: # If only consequent
         specification = coord_consequent
     elif coord_antecedent: # If only antecedent

@@ -223,7 +223,12 @@ def coordinate(input: list, operator: str='and', wrap=False) -> expression:
             result = expression((result, operator, predicate), wrap=wrap)
         return result
 
-def _get_components(token: Token, reference: str=None, var: str=None, level: int=0) -> list:
+def _get_components(token: Token, reference: str=None, var: str=None, level: int=0, inline: bool=False) -> list:
+    """Modifiers of `token` as predicates about it.
+
+    With `inline`, a relative or adjectival clause contributes its own facts rather than a
+    concerns(x, (...)) term, so it can serve as the condition of a rule ("every person that ...").
+    """
     _components = []
     if token is None:
         return _components
@@ -244,13 +249,11 @@ def _get_components(token: Token, reference: str=None, var: str=None, level: int
             other = _get_components(child, reference, var, level)
             if other:
                 _components.extend(other)
-        elif child.dep_ == "acl":
+        elif child.dep_ in ("acl", "relcl"):
             other = main_snepslog(child)
-            if other:
-                _components.append(predicate("concerns", [true_ref, f"({other})"]))
-        elif child.dep_ == "relcl":
-            other = main_snepslog(child)
-            if other:
+            if other and inline and not list(other.quantifiers):
+                _components.extend(other.segments)
+            elif other:
                 _components.append(predicate("concerns", [true_ref, f"({other})"]))
         elif child.dep_ == "xcomp":
             other = main_snepslog(child)
@@ -273,6 +276,22 @@ def _get_components(token: Token, reference: str=None, var: str=None, level: int
                           TranscriptionWarning, stacklevel=2)
     return _components
 
+def _restrictor_variables(token: Token, restrictor: list) -> list:
+    """Constants that a quantified noun's modifiers introduce (the state of its relative clause,
+    "a car", ...). They must be quantified too, or the rule would only match those exact constants."""
+    used = {arg for item in restrictor if isinstance(item, predicate) for arg in item.args}
+    variables = []
+    for t in token.subtree:
+        if t is token or is_distinct(t) or is_num(t) or is_pron(t):
+            continue
+        try:
+            constant = ref(t)
+        except Exception:
+            continue
+        if constant in used and constant not in variables:
+            variables.append(constant)
+    return variables
+
 def get_components(token: Token, role: str=None, reference: str=None, var: str=None, level: int=0) -> list:
     """Returns a list of modifiers of the given token"""
     components = []
@@ -287,18 +306,19 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
     elif is_thing(token):
 
         if is_many(token):
-            
+
+            # "Every person that is in front of a car ...": the noun and everything that restricts
+            # it (relative clauses, prepositional phrases, adjectives) form the rule's condition.
+            variable = ref(token)
+            restrictor = [predicate(token.lemma_, [variable])] + \
+                _get_components(token, reference, variable, level, inline=True)
             components.append(
                 ForAll(
-                    [ref(token)],
+                    [variable] + _restrictor_variables(token, restrictor),
                     expression((
-                        predicate(token.lemma_, [ref(token)]),
+                        coordinate(restrictor),
                         "=>",
-                        expression((
-                            coordinate(_get_components(token, reference, ref(token), level)),
-                            "and", 
-                            predicate(role, [reference, ref(token)])
-                        ))
+                        predicate(role, [reference, variable])
                     ))
                 )
             )
