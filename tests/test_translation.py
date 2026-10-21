@@ -76,17 +76,50 @@ class TranslationTest(unittest.TestCase):
         rule = self.transcribe("The persons behind a car are in danger.")
         self.assertRegex(rule, r"<=> \(")
 
-    def test_nested_prepositional_object_keeps_its_own_reference(self):  # issue #8
+    def test_nested_prepositional_object_keeps_its_own_reference(self):  # issue #7
         rule = self.transcribe("Every person in front of a car is in danger.")
         front = re.search(r"front\((\w+)\)", rule).group(1)
         self.assertRegex(rule, rf"of\({front}, \w+\)")
+
+    def test_negated_rules_keep_their_negation(self):  # issue #7 follow-up
+        for sentence in ["John does not like cats.", "Every dog does not bark."]:
+            out = self.transcribe(sentence)
+            self.assertIn("~", out)
+            self.assertNotIn("&=>", out)
+
+    def test_negated_relative_clause_does_not_crash(self):  # issue #7 follow-up
+        self.assertIn("&=>", self.transcribe("Every dog that does not bark bites."))
+
+    def test_untagged_words_and_punctuation_are_not_names(self):  # issue #4 follow-up
+        out = self.transcribe("John likes apples, pears, etc.")
+        self.assertNotIn("etc", out)
+        self.assertNotIn(".)", out)
+        self.assertIn("all(", self.transcribe("I like MP3s."))  # a plural noun, not a name
+
+    def test_definite_nouns_corefer_and_indefinites_do_not(self):  # issue #6 follow-up
+        cat = lambda out: re.search(r"cat\((\w+)\)", out).group(1)
+        self.assertEqual(cat(self.transcribe("Mary owns the cat.")), cat(self.transcribe("The cat is black.")))
+        dog = lambda out: re.search(r"dog\((\w+)\)", out).group(1)
+        self.assertNotEqual(dog(self.transcribe("A dog chased a cat.")), dog(self.transcribe("A dog is hungry.")))
+
+    def test_direct_calls_get_their_own_constants(self):  # issue #6 follow-up
+        from nlp_utils.spaCy_helpers import get_root, main_snepslog
+        state = lambda: re.search(r"state\((\w+)\)", str(main_snepslog(get_root(
+            self.engine.nlp("person_1 is in front of car_1"))))).group(1)
+        self.assertNotEqual(state(), state())
 
     def test_ground_statements_are_conjunctions(self):  # issue #9
         self.assertNotIn(" or ", self.transcribe("person person_1 is a person."))
         self.assertNotIn(" or ", self.transcribe("The boy likes the cat and the dog."))
 
-    def test_preposition_without_children_does_not_crash(self):  # issue #10
-        self.assertTrue(self.transcribe("person_1 is below stop sign_1"))
+    def test_explicit_or_stays_a_disjunction(self):  # issue #9 follow-up
+        self.assertEqual(self.transcribe("The boy likes the cat or the dog.").count(" or "), 1)
+        self.assertEqual(self.transcribe("The boy likes the cat, the dog or the bird.").count(" or "), 2)
+
+    def test_preposition_without_children_warns_instead_of_crashing(self):  # issue #10
+        from nlp_utils.spaCy_helpers import TranscriptionWarning
+        with self.assertWarns(TranscriptionWarning):
+            self.assertTrue(self.transcribe("person_1 is below stop sign_1"))
 
 
 if __name__ == "__main__":

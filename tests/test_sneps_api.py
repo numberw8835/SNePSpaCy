@@ -11,8 +11,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sneps_wrapper.sneps_api import (DEFAULT_DIRECTORY, SnepsProcessError, SnepsSyntaxError, _balanced,
-                                     _error_text, _wffs, sneps_api)
+from sneps_wrapper.sneps_api import (DEFAULT_DIRECTORY, SnepsContradictionError, SnepsProcessError,
+                                     SnepsSyntaxError, _balanced, _error_text, _wffs, sneps_api)
 
 SNEPS_DIR = os.environ.get("SNEPS_DIR", DEFAULT_DIRECTORY)
 
@@ -37,6 +37,9 @@ class HelperTest(unittest.TestCase):
         # SNePS quotes the rest of the line, including its line break; whitespace is collapsed.
         self.assertEqual(_error_text('foo(x)!.\r\nError: Extra text in input: ".\r\n"\r\n\r\n'),
                          'Extra text in input: ". "')
+        # "error" inside the echoed input is not the start of the message
+        self.assertTrue(_error_text("terror(x) b(c).\r\nError: Wff not followed by terminal punctuation")
+                        .startswith("Wff not followed"))
 
     def test_wffs_either_case_and_nothing_else(self):
         output = "ask(a(?x)).\r\n\r\n  wff2!:  a(c)    \r\n  WFF1!:  A(B)\r\n CPU time : 0.00 \r\n"
@@ -62,6 +65,26 @@ class SnepsTest(unittest.TestCase):
                 api.inform("isa(c")  # unbalanced: refused before it reaches SNePS
             self.assertTrue(api.inform("a(d)"))
             self.assertEqual(api.ask("a(?x)"), ["a(d)"])
+
+    def test_contradiction_is_discarded_and_the_session_continues(self):
+        with sneps_api(directory=SNEPS_DIR, enable_logging=False, timeout=15) as api:
+            api.inform("a(b)")
+            with self.assertRaises(SnepsContradictionError):
+                api.inform("~a(b)")
+            self.assertEqual(api.ask("a(?x)"), ["a(b)"])
+
+    def test_snepsul_error_returns_to_snepslog(self):
+        with sneps_api(directory=SNEPS_DIR, enable_logging=False, timeout=15) as api:
+            api.inform("a(b)")
+            with self.assertRaisesRegex(SnepsSyntaxError, "car of 1"):
+                api._command("^(car 1)")
+            self.assertEqual(api.ask("a(?x)"), ["a(b)"])
+
+    def test_statement_longer_than_a_terminal_line(self):
+        rule = "all(x)({" + ", ".join(f"p{i}(x)" for i in range(600)) + "} &=> {q(x)})"
+        self.assertGreater(len(rule), 4096)
+        with sneps_api(directory=SNEPS_DIR, enable_logging=False, timeout=30) as api:
+            self.assertTrue(api.inform(rule))
 
     def test_timeout_stops_the_session(self):
         with sneps_api(directory=SNEPS_DIR, enable_logging=False, timeout=1) as api:
