@@ -17,8 +17,8 @@ This project provides a command-line interface and a Python API to interact with
 
 This system leverages the SNePS knowledge representation and reasoning system to perform semantic parsing of natural language. The core functionality involves:
 
-* **Natural Language Transcription**: Converting user input into SNePSLOG, a logical representation. This is handled by the `semantic_parser.core.snepslog` class, which utilizes `spaCy` for NLP tasks like root identification and dependency parsing (uploaded:project/nlp_utils/spaCy_helpers.py).
-* **SNePS Interaction**: The `sneps_wrapper.sneps_api.py` module facilitates communication with a SNePS executable (uploaded:project/Sneps-Linux-Exe-2.7.0/Sneps-2.7.0.sh). It allows for initializing the SNePS environment, informing (asserting) new facts, querying the knowledge base, listing well-formed formulas (wffs), and clearing the knowledge base.
+* **Natural Language Transcription**: Converting user input into SNePSLOG, a logical representation. This is handled by the `semantic_parser.core.snepslog` class, which utilizes `spaCy` for NLP tasks like root identification and dependency parsing.
+* **SNePS Interaction**: The `sneps_wrapper.sneps_api.py` module facilitates communication with a SNePS executable (`Sneps-Linux-Exe-2.7.0/Sneps-2.7.0.sh`). It allows for initializing the SNePS environment, informing (asserting) new facts, querying the knowledge base, listing well-formed formulas (wffs), and clearing the knowledge base.
 * **Logical Representation**: The `logic_utls.logica.py` module defines classes for representing logical predicates, expressions (atomic and binary), and quantifiers (ForAll, Exists). It includes methods for negation, normalization, and skolemization of logical formulas.
 * **Command-Line Interface**: The `main.py` script provides a user-friendly console to interact with the system, offering different modes for API interaction (on/off) and specific commands for managing and querying the SNePS knowledge base.
 
@@ -53,7 +53,7 @@ The primary way to interact with the system is through the `main.py` script.
     ```
     * `--api-mode on` (default): Natural language input will be transcribed and then asserted into the SNePS knowledge base. SNePS commands like `ask`, `list-wffs`, and `clearkb` will interact with the SNePS engine.
     * `--api-mode off`: Natural language input will only be transcribed and displayed. SNePS commands will indicate they are skipped, and no interaction with the SNePS engine will occur.
-    * `--file FILE`: read commands and sentences from a file, one per line, instead of the prompt. Blank lines and lines starting with `#` are skipped. Piped or redirected input (`python main.py < sentences.txt`) is read the same way.
+    * `--file FILE`: read commands and sentences from a file, one per line, instead of the prompt. Each line holds one sentence or command; blank lines and lines starting with `#` are skipped, and `exit` or `quit` stops reading. Piped or redirected input (`python main.py < sentences.txt`) is read the same way.
     * `--sneps-dir DIR`: the SNePS folder. Defaults to the bundled `Sneps-Linux-Exe-2.7.0`, wherever the console is started from.
     * `--timeout SECONDS`: how long each SNePS command may take (default 30). Inference over a large knowledge base can need more.
     * Parts of a sentence that cannot be translated are reported as `<W>` warnings.
@@ -79,21 +79,22 @@ For more programmatic control or integration into other Python projects, the `sn
     * Provides methods like `init()`, `inform(message)`, `ask(query)`, `list_wffs()`, `clear_kb()`, and `terminate()`, and works as a context manager: `with sneps_api(timeout=120) as api: ...`.
     * Handles communication, error detection and process management.
       * A statement SNePS rejects raises `SnepsSyntaxError` with SNePS's own message, and the session continues.
+      * A statement that contradicts the knowledge base is discarded and raises `SnepsContradictionError`.
       * A timeout or crash raises `SnepsProcessError` and stops the process; call `init()` to start again.
     * This is ideal for automating interactions with SNePS or building custom applications on top of its reasoning capabilities.
 
 ## Core Components 🔩
 
-* **`project/main.py`**: The main entry point for the CLI application. It uses the `click` library for command-line argument parsing and `prompt_toolkit` for an enhanced interactive console experience.
-* **`project/sneps_wrapper/sneps_api.py`**: A Python wrapper for interacting with the SNePS executable. It handles spawning the SNePS process, sending commands, and parsing output. It defines custom exceptions like `SnepsApiError`, `SnepsSyntaxError`, and `SnepsInitializationError`.
-* **`project/semantic_parser/core.py`**: Contains the `snepslog` class responsible for transcribing natural language into SNePSLOG. It utilizes `spacy` for linguistic analysis.
-* **`project/logic_utls/logica.py`**: Defines Python classes for representing logical constructs such as predicates (`predicate`), logical expressions (`expression` including binary and atomic forms), and quantifiers (`ForAll`, `Exists`). It provides methods for logical operations like negation and normalization, as well as a function for `intentionalize` to transform universal intentions.
-* **`project/nlp_utils/spaCy_helpers.py`**: A suite of helper functions that use `spacy` to analyze tokens from a parsed sentence. Functions include identifying token types (e.g., `is_action`, `is_thing`), dependencies (`get_dependant`), and transforming them into logical components for SNePSLOG using the classes from `logic_utls.logica.py`.
-* **`project/Sneps-Linux-Exe-2.7.0/`**: This directory contains the SNePS 2.7.0 executable (`Sneps-2.7.0.sh`) and related files, including READMEs and Java API components (though the Python API is the primary interaction method for this project).
+* **`main.py`**: The main entry point for the CLI application. It uses the `click` library for command-line argument parsing and `prompt_toolkit` for an enhanced interactive console experience.
+* **`sneps_wrapper/sneps_api.py`**: A Python wrapper for interacting with the SNePS executable. It handles spawning the SNePS process, sending commands, and parsing output. It defines custom exceptions like `SnepsApiError`, `SnepsSyntaxError`, `SnepsContradictionError`, and `SnepsInitializationError`.
+* **`semantic_parser/core.py`**: Contains the `snepslog` class responsible for transcribing natural language into SNePSLOG. It utilizes `spacy` for linguistic analysis.
+* **`logic_utls/logica.py`**: Defines Python classes for representing logical constructs such as predicates (`predicate`), logical expressions (`expression` including binary and atomic forms), and quantifiers (`ForAll`, `Exists`). It provides methods for logical operations like negation and normalization, as well as a function for `intentionalize` to transform universal intentions.
+* **`nlp_utils/spaCy_helpers.py`**: A suite of helper functions that use `spacy` to analyze tokens from a parsed sentence. Functions include identifying token types (e.g., `is_action`, `is_thing`), dependencies (`get_dependant`), and transforming them into logical components for SNePSLOG using the classes from `logic_utls.logica.py`.
+* **`Sneps-Linux-Exe-2.7.0/`**: This directory contains the SNePS 2.7.0 executable (`Sneps-2.7.0.sh`) and related files, including READMEs and Java API components (though the Python API is the primary interaction method for this project).
 
 ## Intellectual Property ©™️
 
-SNePS is a creation of the SNePS Research Group. All intellectual rights and copyrights pertaining to the SNePS system belong to the SNePS Research Group and the SNePS foundation. We extend our sincere gratitude to the SNePS foundation for their invaluable contribution to the field of knowledge representation and reasoning. (uploaded:project/Sneps-Linux-Exe-2.7.0/SNEPS_EXE_README.txt)
+SNePS is a creation of the SNePS Research Group. All intellectual rights and copyrights pertaining to the SNePS system belong to the SNePS Research Group and the SNePS foundation. We extend our sincere gratitude to the SNePS foundation for their invaluable contribution to the field of knowledge representation and reasoning.
 
 ### Bundled third-party components
 
