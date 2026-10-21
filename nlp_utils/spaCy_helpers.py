@@ -12,8 +12,9 @@ class TranscriptionWarning(UserWarning):
     """Part of a sentence could not be translated and was left out of the result."""
 
 
-# Identifiers such as car_1, person2 or stop_sign_1: letters plus digits or underscores, no spaces.
-_IDENTIFIER = re.compile(r"(?=.*[A-Za-z])(?=.*[0-9_])[A-Za-z0-9_]+")
+# Identifiers such as car_1, person2 or stop_sign_1: a word (optionally joined with '_') ending in a
+# number. Ordinary alphanumeric words (MP3s, H2O, 1990s) do not match.
+_IDENTIFIER = re.compile(r"[A-Za-z]+(?:_[A-Za-z]+)*_?[0-9]+")
 
 # Number of the sentence being transcribed. It is part of every generated constant, so the
 # states, events and things of one sentence never share a constant with another sentence's.
@@ -42,10 +43,10 @@ def has_dependant(token: Token, dependency: str) -> bool:
     return any(child.dep_ == dependency for child in token.children)
 
 def is_distinct(token: Token) -> bool:
-    """Checks whether the token names an individual: a proper noun, a token spaCy could not
-    tag (X), or an identifier such as car_1. spaCy tags the same identifier as NOUN, PROPN, NUM
-    or X depending on context, so identifiers are recognised by their form."""
-    return token.pos_ in ("PROPN", "X") or bool(_IDENTIFIER.fullmatch(token.text))
+    """Checks whether the token names an individual: a proper noun or an identifier such as car_1.
+    spaCy tags the same identifier as NOUN, PROPN, NUM or X depending on context, so identifiers
+    are recognised by their form."""
+    return token.pos_ == "PROPN" or bool(_IDENTIFIER.fullmatch(token.text))
 
 def is_action(token: Token) -> bool:
     """Checks whether the token is a Verb"""
