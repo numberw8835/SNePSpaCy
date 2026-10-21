@@ -481,7 +481,8 @@ class AndEntailment:
                 f"{{{', '.join(str(c) for c in self.consequents)}}}")
 
     def negate(self):
-        raise NotImplementedError("Negation of an and-entailment is not supported.")
+        # ~({a, b} &=> {c, d}) is (a and b) and ~(c and d).
+        return expression((coordinate(self.antecedents), 'and', coordinate(self.consequents).negate()), wrap=True)
 
     def normalize(self):
         return copy.deepcopy(self)

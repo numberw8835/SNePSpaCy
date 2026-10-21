@@ -5,7 +5,7 @@ import re
 import warnings
 from collections import defaultdict
 from spacy.tokens import Token
-from logic_utls.logica import predicate, expression, ForAll, intentionalize
+from logic_utls.logica import predicate, expression, ForAll, AndEntailment, intentionalize
 
 
 class TranscriptionWarning(UserWarning):
@@ -251,8 +251,12 @@ def _get_components(token: Token, reference: str=None, var: str=None, level: int
                 _components.extend(other)
         elif child.dep_ in ("acl", "relcl"):
             other = main_snepslog(child)
-            if other and inline and not list(other.quantifiers):
-                _components.extend(other.segments)
+            # A negated clause comes back as a quantified formula; it stays a concerns() term.
+            if other and inline and isinstance(other, expression) and not list(other.quantifiers):
+                for segment in other.segments:
+                    if isinstance(segment, expression) and segment.is_binary:
+                        segment.wrap = True  # SNePS rejects "a and b or c" without parentheses
+                    _components.append(segment)
             elif other:
                 _components.append(predicate("concerns", [true_ref, f"({other})"]))
         elif child.dep_ == "xcomp":
@@ -280,7 +284,7 @@ def _get_components(token: Token, reference: str=None, var: str=None, level: int
 def _restrictor_variables(token: Token, restrictor: list) -> list:
     """Constants that a quantified noun's modifiers introduce (the state of its relative clause,
     "a car", ...). They must be quantified too, or the rule would only match those exact constants."""
-    used = {arg for item in restrictor if isinstance(item, predicate) for arg in item.args}
+    used = {arg for item in restrictor for p in item._get_all_predicates() for arg in p.args}
     variables = []
     for t in token.subtree:
         if t is token or is_distinct(t) or is_num(t) or is_pron(t):
@@ -458,6 +462,10 @@ def main_snepslog(token: Token) -> expression:
                 if not negation:
                     quant.skolemize_arg(ref(token), list(dict.fromkeys(quant.variables)))
                 else:
+                    if isinstance(quant.formula, AndEntailment):
+                        # &=> cannot carry a negated consequent; fall back to the => form.
+                        quant.formula = expression((coordinate(quant.formula.antecedents), "=>",
+                                                    coordinate(quant.formula.consequents)), wrap=True)
                     if isinstance(quant.formula, expression) and quant.formula.operator == "=>":
                         quant.variables.append(ref(token))
                         if hasattr(quant.formula.operant_2, "negate") and isinstance(quant.formula.operant_2, expression):
