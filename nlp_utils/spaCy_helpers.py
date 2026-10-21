@@ -312,14 +312,14 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
 
     elif is_particle(token):
 
-        skip = next((child for child in token.children), True)
-        if skip:
+        skip = next((child for child in token.children), None)
+        if skip is not None:
             components.extend(get_components(skip, role, reference, var, level))
 
     elif token.pos_ in ["SCONJ"]:
-        skip = next((child for child in token.children), True)
-        if skip:
-            components.extend(get_components(skip, token.text, reference, var, level))    
+        skip = next((child for child in token.children), None)
+        if skip is not None:
+            components.extend(get_components(skip, token.text, reference, var, level))
     else:
         # raise Exception(f"({token}, {token.pos_}) Is an unknown token type, please account for it")
         print(f"Warning: ({token}, {token.pos_}) Is an unknown BASE_1 token type, please account for it")
