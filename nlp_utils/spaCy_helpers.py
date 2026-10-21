@@ -260,7 +260,8 @@ def _get_components(token: Token, reference: str=None, var: str=None, level: int
             if other:
                 _components.append(predicate("concerns", [true_ref, f"({other})"]))
         elif child.dep_ == "prep":
-            _components.extend(get_components(child, child.text, true_ref, var, level))
+            # `var` names this token only; the prepositional object's own modifiers refer to it.
+            _components.extend(get_components(child, child.text, true_ref, None, level))
         elif child.dep_ == "compound":
             _components.append(predicate(child.lemma_, [true_ref]))
         elif child.dep_ == "det":
