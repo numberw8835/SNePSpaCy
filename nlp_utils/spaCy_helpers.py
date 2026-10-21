@@ -312,7 +312,14 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
 
     elif is_particle(token):
 
-        skip = next((child for child in token.children), None)
+        # Follow the preposition's object. An adverb attached to the preposition ("completely
+        # to the left of") modifies the relation, so it is kept as a modifier of the reference.
+        for child in token.children:
+            if child.dep_ == "advmod":
+                components.append(predicate(child.lemma_, [reference]))
+        skip = next((child for child in token.children if child.dep_ in ("pobj", "pcomp")), None)
+        if skip is None:
+            skip = next((child for child in token.children if child.dep_ != "advmod"), None)
         if skip is not None:
             components.extend(get_components(skip, role, reference, var, level))
 
