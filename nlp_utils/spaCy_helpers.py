@@ -403,11 +403,15 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
             skip = next((child for child in token.children if child.dep_ != "advmod"), None)
         if skip is not None:
             components.extend(get_components(skip, role, reference, var, level))
+        else:
+            warnings.warn(f"preposition '{token}' has no object and was left out", TranscriptionWarning, stacklevel=2)
 
     elif token.pos_ in ["SCONJ"]:
         skip = next((child for child in token.children), None)
         if skip is not None:
             components.extend(get_components(skip, token.text, reference, var, level))
+        else:
+            warnings.warn(f"'{token}' has no clause and was left out", TranscriptionWarning, stacklevel=2)
     else:
         warnings.warn(f"'{token}' ({token.pos_}) is not a handled token type and was left out",
                       TranscriptionWarning, stacklevel=2)
