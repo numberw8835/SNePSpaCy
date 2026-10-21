@@ -1,6 +1,7 @@
 import contextlib
 import contextvars
 import hashlib
+import itertools
 import re
 import warnings
 from collections import defaultdict
@@ -18,13 +19,15 @@ _IDENTIFIER = re.compile(r"[A-Za-z]+(?:_[A-Za-z]+)*_?[0-9]+")
 
 # Number of the sentence being transcribed. It is part of every generated constant, so the
 # states, events and things of one sentence never share a constant with another sentence's.
-_SENTENCE = contextvars.ContextVar("snepspacy_sentence", default=0)
+# Numbers come from one counter for the whole process, whichever engine transcribes.
+_SENTENCE = contextvars.ContextVar("snepspacy_sentence", default=None)
+_SENTENCE_NUMBERS = itertools.count(1)
 
 
 @contextlib.contextmanager
-def sentence_scope(number):
-    """Generate constants for sentence `number` inside this block."""
-    token = _SENTENCE.set(number)
+def sentence_scope(number=None):
+    """Generate constants for sentence `number` (by default, the next unused one) inside this block."""
+    token = _SENTENCE.set(next(_SENTENCE_NUMBERS) if number is None else number)
     try:
         yield
     finally:
@@ -109,14 +112,25 @@ def create_var(string: str, seed: int = 0, length: int = 5) -> str:
     hex_dig = hash_object.hexdigest()
     return hex_dig[:length]
 
+def is_discourse_definite(token: Token) -> bool:
+    """A plain definite singular noun ("the cat") that denotes the same individual in every
+    sentence. Modified definites ("the left of car_1") and indefinites are new in each sentence."""
+    return (is_thing(token) and token.tag_ not in ("NNS", "NNPS")
+            and any(c.dep_ == "det" and c.lower_ == "the" for c in token.children)
+            and not any(c.dep_ in ("prep", "relcl", "acl", "amod", "compound", "poss", "nummod")
+                        for c in token.children))
+
 def ref(token: Token, seed: int = 0, length: int = 9) -> str:
     """Returns a reference var to the given token.
 
-    Names and numbers stand for themselves. Every other token gets a constant derived from its
-    text, its position in the sentence and the sentence number, so two occurrences of "is" (or
-    "a car") denote different individuals, within a sentence and across sentences.
+    Names and numbers stand for themselves, and a plain definite noun ("the cat") has one constant
+    per lemma. Every other token gets a constant derived from its text, its position in the
+    sentence and the sentence number, so two occurrences of "is" (or "a car") denote different
+    individuals, within a sentence and across sentences.
     """
     key = f"{token.text}|{token.i}|{_SENTENCE.get()}"
+    if is_discourse_definite(token):
+        key = f"the|{token.lemma_.lower()}"
     if is_distinct(token):
         return token.text
     elif is_action(token):
@@ -288,7 +302,8 @@ def _restrictor_variables(token: Token, restrictor: list) -> list:
     used = {arg for item in restrictor for p in item._get_all_predicates() for arg in p.args}
     variables = []
     for t in token.subtree:
-        if t is token or is_distinct(t) or is_num(t) or is_pron(t):
+        # Names, numbers and definite nouns ("the shelf") stay specific; pronouns refer to the noun.
+        if t is token or is_distinct(t) or is_num(t) or is_pron(t) or is_discourse_definite(t):
             continue
         try:
             constant = ref(t)
@@ -404,6 +419,10 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
     return components
 
 def main_snepslog(token: Token) -> expression:
+    if _SENTENCE.get() is None:
+        # A new sentence: give it its own number (nested clauses share their sentence's number).
+        with sentence_scope():
+            return main_snepslog(token)
 
     if token is None:
         raise Exception("No token provided")
