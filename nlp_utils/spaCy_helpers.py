@@ -1,7 +1,17 @@
 import hashlib
+import re
+import warnings
 from collections import defaultdict
 from spacy.tokens import Token
 from logic_utls.logica import predicate, expression, ForAll, intentionalize
+
+
+class TranscriptionWarning(UserWarning):
+    """Part of a sentence could not be translated and was left out of the result."""
+
+
+# Identifiers such as car_1, person2 or stop_sign_1: letters plus digits or underscores, no spaces.
+_IDENTIFIER = re.compile(r"(?=.*[A-Za-z])(?=.*[0-9_])[A-Za-z0-9_]+")
 
 def get_root(sentence: list) -> Token:
     """Returns the root token"""
@@ -16,8 +26,10 @@ def has_dependant(token: Token, dependency: str) -> bool:
     return any(child.dep_ == dependency for child in token.children)
 
 def is_distinct(token: Token) -> bool:
-    """Checks whether the token is a Proper Noun"""
-    return token.pos_ == "PROPN"
+    """Checks whether the token names an individual: a proper noun, a token spaCy could not
+    tag (X), or an identifier such as car_1. spaCy tags the same identifier as NOUN, PROPN, NUM
+    or X depending on context, so identifiers are recognised by their form."""
+    return token.pos_ in ("PROPN", "X") or bool(_IDENTIFIER.fullmatch(token.text))
 
 def is_action(token: Token) -> bool:
     """Checks whether the token is a Verb"""
@@ -235,7 +247,8 @@ def _get_components(token: Token, reference: str=None, var: str=None, level: int
         elif child.dep_ == "mark":
             continue
         else:
-            print(f"Warning: {child.dep_} not implemented BASE_2")
+            warnings.warn(f"dependency '{child.dep_}' of '{token}' is not handled; '{child}' was left out",
+                          TranscriptionWarning, stacklevel=2)
     return _components
 
 def get_components(token: Token, role: str=None, reference: str=None, var: str=None, level: int=0) -> list:
@@ -331,8 +344,8 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
         if skip is not None:
             components.extend(get_components(skip, token.text, reference, var, level))
     else:
-        # raise Exception(f"({token}, {token.pos_}) Is an unknown token type, please account for it")
-        print(f"Warning: ({token}, {token.pos_}) Is an unknown BASE_1 token type, please account for it")
+        warnings.warn(f"'{token}' ({token.pos_}) is not a handled token type and was left out",
+                      TranscriptionWarning, stacklevel=2)
     
     conjs = [child for child in token.children if child.dep_ == "conj"]
 
