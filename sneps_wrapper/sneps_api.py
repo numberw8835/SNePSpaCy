@@ -1,11 +1,22 @@
-import pexpect
-import os
 import logging
-import re # Import the regular expression module
+import os
+import re
 
-# Configure basic logging - this will still be configured,
-# but individual log calls will be conditional.
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+import pexpect
+
+logger = logging.getLogger(__name__)
+
+# The bundled SNePS build, found relative to this file so the wrapper works from any directory.
+DEFAULT_DIRECTORY = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Sneps-Linux-Exe-2.7.0")
+
+# What SNePS 2.7 prints, as observed with the bundled Linux build:
+_DONE = r"CPU time : [\d.]+"           # after every SNePSLOG command
+_PROMPT = r"\r\n: "                     # the SNePSLOG prompt that follows it
+_RESTARTS = r"Restart actions"          # Allegro's restart menu, shown after a rejected command
+_DEBUG_PROMPT = r"\] snepslog\(\d+\): "  # the debugger prompt that follows the menu
+_CONTINUE = re.compile(r"(\d+): Continue with SNePSLOG")
+_WFF = re.compile(r"^\s*wff\d+!:\s*(.*?)\s*$", re.IGNORECASE)
+
 
 class SnepsApiError(Exception):
     """Custom exception class for SNePS API errors."""
@@ -23,267 +34,155 @@ class SnepsInitializationError(SnepsApiError):
     """Raised when SNePS initialization fails."""
     pass
 
+
+def _balanced(text):
+    depth = {"(": 0, "{": 0}
+    for ch in text:
+        if ch in "({":
+            depth[ch] += 1
+        elif ch in ")}":
+            depth["(" if ch == ")" else "{"] -= 1
+            if min(depth.values()) < 0:
+                return False
+    return not any(depth.values())
+
+
+def _error_text(output):
+    """The message SNePS printed after 'Error:', on one line."""
+    match = re.search(r"error:?\s*(.*)", output, re.IGNORECASE | re.DOTALL)
+    return " ".join((match.group(1) if match else output).split())
+
+
+def _wffs(output):
+    """The formulas in SNePS output lines such as 'wff3!:  a(b)' (either case)."""
+    return [m.group(1) for m in map(_WFF.match, output.splitlines()) if m]
+
+
 class sneps_api:
-    def __init__(self, directory="Sneps-Linux-Exe-2.7.0", enable_logging=True):
-        self.current_directory = os.getcwd()
-        self.sneps_directory = directory
+    def __init__(self, directory=DEFAULT_DIRECTORY, enable_logging=True, timeout=30):
+        """`directory` is the SNePS folder containing Sneps-2.7.0.sh. `timeout` is how many seconds
+        each SNePS command may take; inference over a large knowledge base can need more than 30."""
+        self.sneps_directory = os.path.abspath(directory)
         self.process = None
         self.logging_enabled = enable_logging
-        # Regex to remove "wff<number>!: " prefix
-        self.wff_prefix_regex = re.compile(r"wff\d+!:\s*")
+        self.timeout = timeout
 
-
-        if self.logging_enabled:
-            logging.info(f"Logging is enabled for sneps_api instance.")
-        else:
-            pass # Logging calls will be skipped if not enabled
-
-
-        # Validate SNePS directory early
         if not os.path.isdir(self.sneps_directory):
-            if self.logging_enabled:
-                logging.error(f"SNePS directory not found: {self.sneps_directory}")
             raise SnepsInitializationError(f"SNePS directory not found: {self.sneps_directory}")
-        if not os.access(os.path.join(self.sneps_directory, "Sneps-2.7.0.sh"), os.X_OK):
-            if self.logging_enabled:
-                logging.error(f"Sneps-2.7.0.sh not found or not executable in {self.sneps_directory}")
-            raise SnepsInitializationError(f"Sneps-2.7.0.sh not found or not executable in {self.sneps_directory}")
+        if not os.path.isfile(os.path.join(self.sneps_directory, "Sneps-2.7.0.sh")):
+            raise SnepsInitializationError(f"Sneps-2.7.0.sh not found in {self.sneps_directory}")
+
+    def _log(self, level, message):
+        # Logging goes to this module's logger; configuring handlers is up to the application.
+        if self.logging_enabled:
+            logger.log(level, message)
+
+    def __enter__(self):
+        if self.process is None or not self.process.isalive():
+            self.init()
+        return self
+
+    def __exit__(self, *exc):
+        self.terminate()
 
     def init(self):
-        original_dir = os.getcwd()
         try:
-            os.chdir(self.sneps_directory)
-            if self.logging_enabled:
-                logging.info(f"Changed directory to {self.sneps_directory}")
-
-            # Spawn the SNePS process
-            self.process = pexpect.spawn("sh Sneps-2.7.0.sh")
-            if self.logging_enabled:
-                logging.info("SNePS process spawned.")
-
-            # Initial commands and expectations
+            self.process = pexpect.spawn("sh Sneps-2.7.0.sh", cwd=self.sneps_directory, timeout=self.timeout,
+                                         encoding="utf-8", codec_errors="replace")
             self.process.expect("Type")
-            if self.logging_enabled:
-                logging.info("Initial SNePS prompt 'Type' received.")
             self.process.sendline("(snepslog)")
             self.process.expect("Welcome")
-            if self.logging_enabled:
-                logging.info("SNePSLOG started, 'Welcome' received.")
-            self.process.sendline("clearkb") # Initial clear kb
-            self.process.expect("CPU")
-            if self.logging_enabled:
-                logging.info("Knowledge base cleared during init, 'CPU' prompt received.")
-
-        except pexpect.exceptions.TIMEOUT as e:
-            if self.logging_enabled:
-                logging.error(f"Timeout during SNePS initialization: {e}")
+            self.process.expect(_PROMPT)
+            self._log(logging.INFO, "SNePSLOG started.")
+            self.clear_kb()
+        except (pexpect.exceptions.TIMEOUT, pexpect.exceptions.EOF, OSError, SnepsApiError) as e:
+            output = self.process.before if self.process is not None and isinstance(self.process.before, str) else ""
             self._safe_terminate_process()
-            raise SnepsInitializationError(f"Timeout during SNePS initialization: {e}")
-        except pexpect.exceptions.EOF as e:
-            if self.logging_enabled:
-                logging.error(f"SNePS process ended unexpectedly during initialization: {e}")
-                before_eof = self.process.before.decode('utf-8', errors='ignore') if self.process and self.process.before else "N/A"
-                logging.error(f"Output before EOF: {before_eof}")
-            self._safe_terminate_process()
-            raise SnepsInitializationError(f"SNePS process ended unexpectedly: {e}. Output: {before_eof if 'before_eof' in locals() else 'N/A'}")
-        except OSError as e:
-            if self.logging_enabled:
-                logging.error(f"OS error during SNePS initialization: {e}")
-            self._safe_terminate_process()
-            raise SnepsInitializationError(f"OS error: {e}")
-        except Exception as e:
-            if self.logging_enabled:
-                logging.error(f"An unexpected error occurred during SNePS initialization: {e}")
-            self._safe_terminate_process()
-            raise SnepsInitializationError(f"Unexpected error: {e}")
-        finally:
-            os.chdir(original_dir)
-            if self.logging_enabled:
-                logging.info(f"Changed directory back to {original_dir}")
-
+            raise SnepsInitializationError(f"SNePS did not start: {e}. Output: {output[-500:]}") from e
 
     def _ensure_process_is_alive(self):
         """Checks if the SNePS process is alive."""
         if self.process is None or not self.process.isalive():
-            if self.logging_enabled:
-                logging.error("SNePS process is not running or not initialized.")
             raise SnepsProcessError("SNePS process is not running. Please call init() first.")
+
+    def _command(self, line):
+        """Send one SNePSLOG command and return what it printed.
+
+        If SNePS rejects the command, SNePS is returned to the SNePSLOG prompt and SnepsSyntaxError
+        carries SNePS's own message. If SNePS does not answer in time or exits, the process is shut
+        down (its output would no longer line up with the commands) and SnepsProcessError is raised.
+        """
+        self._ensure_process_is_alive()
+        try:
+            self.process.sendline(line)
+            if self.process.expect([_DONE, _RESTARTS]) == 0:
+                output = self.process.before
+                self.process.expect(_PROMPT)
+                return output
+            message = _error_text(self.process.before)
+            self.process.expect(_DEBUG_PROMPT)
+            restart = _CONTINUE.search(self.process.before)
+            if restart is None:
+                raise SnepsProcessError(f"SNePS failed on {line!r} and cannot continue: {message}")
+            self.process.sendline(f":continue {restart.group(1)}")
+            self.process.expect(_DONE)
+            self.process.expect(_PROMPT)
+            self._log(logging.WARNING, f"SNePS rejected {line!r}: {message}")
+            raise SnepsSyntaxError(f"SNePS Error: {message} (input: {line})")
+        except pexpect.exceptions.TIMEOUT as e:
+            self._safe_terminate_process()
+            raise SnepsProcessError(f"SNePS did not answer {line!r} within {self.timeout} s; "
+                                    f"the process was stopped, call init() to start again") from e
+        except pexpect.exceptions.EOF as e:
+            self._safe_terminate_process()
+            raise SnepsProcessError(f"SNePS exited while running {line!r}") from e
 
     def clear_kb(self):
         """Sends the 'clearkb' command to SNePS."""
-        self._ensure_process_is_alive()
-        operation_name = "clear_kb"
-        try:
-            self.process.sendline("clearkb")
-            self.process.expect("CPU") # Expect the CPU prompt after clearkb
-            if self.logging_enabled:
-                logging.info("Knowledge base cleared successfully via clear_kb().")
-            return True
-        except pexpect.exceptions.TIMEOUT as e:
-            if self.logging_enabled:
-                logging.error(f"Timeout during {operation_name} operation: {e}")
-            raise SnepsProcessError(f"Timeout during {operation_name}: {e}")
-        except pexpect.exceptions.EOF as e:
-            if self.logging_enabled:
-                logging.error(f"SNePS process ended unexpectedly during {operation_name}: {e}")
-            before_eof = self.process.before.decode('utf-8', errors='ignore') if self.process and self.process.before else "N/A"
-            raise SnepsProcessError(f"SNePS process ended unexpectedly during {operation_name}. Output: {before_eof}")
-        except Exception as e:
-            if self.logging_enabled:
-                logging.error(f"An unexpected error occurred during {operation_name}: {e}")
-            raise SnepsProcessError(f"Unexpected error during {operation_name}: {e}")
-        return False
-
+        self._command("clearkb")
+        self._log(logging.INFO, "Knowledge base cleared.")
+        return True
 
     def inform(self, message):
-        self._ensure_process_is_alive()
-        operation_name = "inform"
-        context_message = f"message '{message}'"
-        if not isinstance(message, str) or not message.strip():
-            if self.logging_enabled:
-                logging.warning("Inform message is empty or not a string.")
+        """Assert one SNePSLOG statement. A final '.' (or '!') is added if missing."""
+        statement = message.strip() if isinstance(message, str) else ""
+        if not statement:
             raise ValueError("Inform message cannot be empty.")
-
-        try:
-            self.process.sendline(f"{message.strip()}.")
-            response = self.process.expect(["CPU", "Error"])
-
-            if response == 0: # Success ("CPU" matched)
-                if self.logging_enabled:
-                    logging.info(f"Successfully informed: {message}")
-                return True
-            elif response == 1: # SNePS reported an error ("Error" matched)
-                error_details = self.process.before.decode("utf-8", errors='ignore').strip()
-                if self.logging_enabled:
-                    logging.warning(f"SNePS syntax error for {context_message}. Details: {error_details}")
-                self.process.sendline("(continue)")
-                self.process.expect("CPU")
-                raise SnepsSyntaxError(f"SNePS Error: Incorrect Syntax! SNePS output: {error_details}")
-
-        except pexpect.exceptions.TIMEOUT as e:
-            if self.logging_enabled:
-                logging.error(f"Timeout during {operation_name} operation for {context_message}: {e}")
-            raise SnepsProcessError(f"Timeout during {operation_name}: {e}")
-        except pexpect.exceptions.EOF as e:
-            if self.logging_enabled:
-                logging.error(f"SNePS process ended unexpectedly during {operation_name} for {context_message}: {e}")
-            before_eof = self.process.before.decode('utf-8', errors='ignore') if self.process and self.process.before else "N/A"
-            raise SnepsProcessError(f"SNePS process ended unexpectedly during {operation_name}. Output: {before_eof}")
-        except Exception as e:
-            if self.logging_enabled:
-                logging.error(f"An unexpected error occurred during {operation_name} for {context_message}: {e}")
-            if isinstance(e, SnepsSyntaxError):
-                raise 
-            raise SnepsProcessError(f"Unexpected error during {operation_name}: {e}")
-        return False
-
+        if "\n" in statement or "\r" in statement:
+            raise SnepsSyntaxError(f"A statement must be on one line: {statement!r}")
+        if not _balanced(statement):
+            # SNePS would wait for the rest of the statement and swallow the next command.
+            raise SnepsSyntaxError(f"Unbalanced brackets, not sent to SNePS: {statement!r}")
+        if not statement.endswith((".", "!")):
+            statement += "."
+        self._command(statement)
+        self._log(logging.INFO, f"Informed: {statement}")
+        return True
 
     def list_wffs(self):
-        self._ensure_process_is_alive()
-        operation_name = "list_wffs"
-        try:
-            self.process.sendline("list-wffs")
-            self.process.expect("CPU")
-            output = self.process.before.decode("utf-8", errors='ignore')
-            
-            result = []
-            for line in output.splitlines():
-                stripped_line = line.strip()
-                if ("wff" in stripped_line.lower()) and ("!" in stripped_line):
-                    cleaned_line = self.wff_prefix_regex.sub("", stripped_line)
-                    result.append(cleaned_line)
-            if self.logging_enabled:
-                logging.info(f"{operation_name} returned {len(result)} items.")
-            return result
-
-        except pexpect.exceptions.TIMEOUT as e:
-            if self.logging_enabled:
-                logging.error(f"Timeout during {operation_name} operation: {e}")
-            raise SnepsProcessError(f"Timeout during {operation_name}: {e}")
-        except pexpect.exceptions.EOF as e:
-            if self.logging_enabled:
-                logging.error(f"SNePS process ended unexpectedly during {operation_name}: {e}")
-            before_eof = self.process.before.decode('utf-8', errors='ignore') if self.process and self.process.before else "N/A"
-            raise SnepsProcessError(f"SNePS process ended unexpectedly during {operation_name}. Output: {before_eof}")
-        except Exception as e:
-            if self.logging_enabled:
-                logging.error(f"An unexpected error occurred during {operation_name}: {e}")
-            raise SnepsProcessError(f"Unexpected error during {operation_name}: {e}")
+        result = _wffs(self._command("list-wffs"))
+        self._log(logging.INFO, f"list_wffs returned {len(result)} items.")
+        return result
 
     def ask(self, message):
-        self._ensure_process_is_alive()
-        operation_name = "ask"
-        context_message = f"query '{message}'"
-        if not isinstance(message, str) or not message.strip():
-            if self.logging_enabled:
-                logging.warning("Ask message is empty or not a string. Returning empty list.")
+        query = message.strip().rstrip(".?").strip() if isinstance(message, str) else ""
+        if not query:
             return []
-
-        try:
-            self.process.sendline(f"ask({message.strip()}).")
-            response = self.process.expect(["CPU", "Error"])
-
-            if response == 0: # Success ("CPU" matched)
-                output = self.process.before.decode("utf-8", errors='ignore')
-                result = []
-                for line in output.splitlines():
-                    stripped_line = line.strip()
-                    if ("wff" in stripped_line.lower()) and ("!" in stripped_line):
-                        cleaned_line = self.wff_prefix_regex.sub("", stripped_line)
-                        result.append(cleaned_line)
-                if self.logging_enabled:
-                    logging.info(f"{operation_name} query '{message}' returned {len(result)} items.")
-                return result
-            elif response == 1: # SNePS reported an error ("Error" matched)
-                error_details = self.process.before.decode("utf-8", errors='ignore').strip()
-                if self.logging_enabled:
-                    logging.warning(f"SNePS syntax error for {context_message}. Details: {error_details}")
-                self.process.sendline("(continue)")
-                self.process.expect("CPU")
-                raise SnepsSyntaxError(f"SNePS Error: Incorrect Syntax for {context_message}! SNePS output: {error_details}")
-            
-        except pexpect.exceptions.TIMEOUT as e:
-            if self.logging_enabled:
-                logging.error(f"Timeout during {operation_name} operation for {context_message}: {e}")
-            raise SnepsProcessError(f"Timeout during {operation_name}: {e}")
-        except pexpect.exceptions.EOF as e:
-            if self.logging_enabled:
-                logging.error(f"SNePS process ended unexpectedly during {operation_name} for {context_message}: {e}")
-            before_eof = self.process.before.decode('utf-8', errors='ignore') if self.process and self.process.before else "N/A"
-            raise SnepsProcessError(f"SNePS process ended unexpectedly during {operation_name}. Output: {before_eof}")
-        except Exception as e:
-            if self.logging_enabled:
-                logging.error(f"An unexpected error occurred during {operation_name} for {context_message}: {e}")
-            if isinstance(e, SnepsSyntaxError):
-                raise 
-            raise SnepsProcessError(f"Unexpected error during {operation_name}: {e}")
-        return [] 
+        if not _balanced(query):
+            raise SnepsSyntaxError(f"Unbalanced brackets, not sent to SNePS: {query!r}")
+        result = _wffs(self._command(f"ask({query})."))
+        self._log(logging.INFO, f"ask({query}) returned {len(result)} items.")
+        return result
 
     def _safe_terminate_process(self):
         """Safely terminates the SNePS process if it's running."""
-        if self.process and self.process.isalive():
+        if self.process is not None and self.process.isalive():
             try:
                 self.process.terminate(force=True)
-                if self.logging_enabled:
-                    logging.info("SNePS process terminated.")
             except Exception as e:
-                if self.logging_enabled:
-                    logging.warning(f"Error while terminating SNePS process: {e}")
+                self._log(logging.WARNING, f"Error while terminating SNePS process: {e}")
         self.process = None
 
-
     def terminate(self):
-        if self.logging_enabled:
-            logging.info("Terminating SNePS API session.")
+        self._log(logging.INFO, "Terminating SNePS API session.")
         self._safe_terminate_process()
-        original_dir_to_return_to = self.current_directory
-        try:
-            if os.getcwd() != original_dir_to_return_to:
-                os.chdir(original_dir_to_return_to)
-                if self.logging_enabled:
-                    logging.info(f"Changed directory back to {original_dir_to_return_to}.")
-        except OSError as e:
-            if self.logging_enabled:
-                logging.error(f"Could not change directory back to {original_dir_to_return_to}: {e}")
-        finally:
-            self.current_directory = os.getcwd()
