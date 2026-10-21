@@ -7,6 +7,8 @@ from semantic_parser.core import snepslog
 from sneps_wrapper.sneps_api import sneps_api, SnepsApiError, SnepsSyntaxError, DEFAULT_DIRECTORY
 from nlp_utils.spaCy_helpers import TranscriptionWarning
 
+_WARNING_REGISTRY = {}  # so other libraries' warnings are shown once, not for every sentence
+
 
 def handle(user_input, engine, api, api_mode):
     """Run one console command or sentence. Returns False when the user asked to exit."""
@@ -16,6 +18,15 @@ def handle(user_input, engine, api, api_mode):
     if user_input_lower in ['exit', 'quit']:
         click.echo("Exiting SNePS console...")
         return False
+
+    if api_mode == 'on' and user_input_trimmed and (api.process is None or not api.process.isalive()):
+        # SNePS stops after a timeout or a crash; start it again rather than failing every line.
+        try:
+            api.init()
+            click.echo("\n\t<!> SNePS had stopped and was restarted; the knowledge base is empty.\n")
+        except SnepsApiError as e:
+            click.echo(f"\n\t<!> SNePS is not running and could not be restarted: {e}\n")
+            return True
 
     elif user_input_lower == "clearkb":
         if api_mode == 'on':
@@ -87,7 +98,8 @@ def handle(user_input, engine, api, api_mode):
                 if issubclass(warning.category, TranscriptionWarning):
                     click.echo(f"\t<W> {warning.message}")
                 else:
-                    warnings.warn_explicit(warning.message, warning.category, warning.filename, warning.lineno)
+                    warnings.warn_explicit(warning.message, warning.category, warning.filename, warning.lineno,
+                                           registry=_WARNING_REGISTRY)
 
             if not results_str:
                 click.echo("\n\t<?> Input is empty or transcription failed.\n")
@@ -159,7 +171,7 @@ def interactive(engine, api, api_mode):
 def batch(lines, engine, api, api_mode):
     """Run one command or sentence per line; blank lines and lines starting with '#' are skipped."""
     for line in lines:
-        line = line.strip()
+        line = line.strip().lstrip("﻿")  # a file saved by Notepad starts with a byte-order mark
         if not line or line.startswith("#"):
             continue
         click.echo(f"//: {line}")

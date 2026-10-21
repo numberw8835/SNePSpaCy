@@ -2,7 +2,10 @@ import logging
 import os
 import re
 
-import pexpect
+try:
+    import pexpect
+except ImportError:  # only needed to run SNePS; transcription works without it
+    pexpect = None
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +97,9 @@ class sneps_api:
 
     def init(self):
         self._safe_terminate_process()  # never leave an earlier SNePS process behind
+        if pexpect is None or not hasattr(pexpect, "spawn"):
+            raise SnepsInitializationError("Running SNePS needs pexpect with spawn(), i.e. Linux "
+                                           "(on Windows, use WSL).")
         try:
             self.process = pexpect.spawn("sh Sneps-2.7.0.sh", cwd=self.sneps_directory, timeout=self.timeout,
                                          encoding="utf-8", codec_errors="replace")
