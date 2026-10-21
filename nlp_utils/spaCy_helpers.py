@@ -1,3 +1,5 @@
+import contextlib
+import contextvars
 import hashlib
 import re
 import warnings
@@ -12,6 +14,20 @@ class TranscriptionWarning(UserWarning):
 
 # Identifiers such as car_1, person2 or stop_sign_1: letters plus digits or underscores, no spaces.
 _IDENTIFIER = re.compile(r"(?=.*[A-Za-z])(?=.*[0-9_])[A-Za-z0-9_]+")
+
+# Number of the sentence being transcribed. It is part of every generated constant, so the
+# states, events and things of one sentence never share a constant with another sentence's.
+_SENTENCE = contextvars.ContextVar("snepspacy_sentence", default=0)
+
+
+@contextlib.contextmanager
+def sentence_scope(number):
+    """Generate constants for sentence `number` inside this block."""
+    token = _SENTENCE.set(number)
+    try:
+        yield
+    finally:
+        _SENTENCE.reset(token)
 
 def get_root(sentence: list) -> Token:
     """Returns the root token"""
@@ -92,18 +108,24 @@ def create_var(string: str, seed: int = 0, length: int = 5) -> str:
     hex_dig = hash_object.hexdigest()
     return hex_dig[:length]
 
-def ref(token: Token, seed: int = 0, length: int = 5) -> str:
-    """Returns a reference var to the given token"""
+def ref(token: Token, seed: int = 0, length: int = 9) -> str:
+    """Returns a reference var to the given token.
+
+    Names and numbers stand for themselves. Every other token gets a constant derived from its
+    text, its position in the sentence and the sentence number, so two occurrences of "is" (or
+    "a car") denote different individuals, within a sentence and across sentences.
+    """
+    key = f"{token.text}|{token.i}|{_SENTENCE.get()}"
     if is_distinct(token):
         return token.text
     elif is_action(token):
-        return "e" + create_var(token.text, seed, length-1)
+        return "e" + create_var(key, seed, length-1)
     elif is_state(token):
-        return "s" + create_var(token.text, seed, length-1)
+        return "s" + create_var(key, seed, length-1)
     elif is_thing(token):
-        return token.text[0] + create_var(token.text, seed, length-1)
+        return token.text[0] + create_var(key, seed, length-1)
     elif is_modifier(token):
-        return "m" + create_var(token.text, seed, length-1)
+        return "m" + create_var(key, seed, length-1)
     elif is_num(token):
         return token.text
     elif is_pron(token):
@@ -112,7 +134,7 @@ def ref(token: Token, seed: int = 0, length: int = 5) -> str:
         else:
             return token.lemma_.lower()[0] + create_var(token.lemma_.lower(), seed, length-1)
     elif is_particle(token):
-        return "p" + create_var(token.text, seed, length-1)
+        return "p" + create_var(key, seed, length-1)
     else:
         raise Exception(f"({token}, {token.pos_}) Is an unknown token type")
 
