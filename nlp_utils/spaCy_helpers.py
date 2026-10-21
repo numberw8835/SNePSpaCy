@@ -333,15 +333,18 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
             # "Every person that is in front of a car ...": the noun and everything that restricts
             # it (relative clauses, prepositional phrases, adjectives) form the rule's condition.
             variable = ref(token)
-            restrictor = [predicate(token.lemma_, [variable])] + \
-                _get_components(token, reference, variable, level, inline=True)
+            modifiers = _get_components(token, reference, variable, level, inline=True)
+            # A modifier with its own quantifier ("owner of dogs") stays in the consequent, as
+            # before: nested inside the condition, SNePS does not finish asserting the rule.
+            quantified = [m for m in modifiers if list(m._get_all_quantifiers())]
+            restrictor = [predicate(token.lemma_, [variable])] + [m for m in modifiers if m not in quantified]
             components.append(
                 ForAll(
                     [variable] + _restrictor_variables(token, restrictor),
                     expression((
                         coordinate(restrictor),
                         "=>",
-                        predicate(role, [reference, variable])
+                        coordinate(quantified + [predicate(role, [reference, variable])])
                     ))
                 )
             )
