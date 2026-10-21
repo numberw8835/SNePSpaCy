@@ -274,11 +274,12 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
                     expression( (
                         predicate("member", [create_var("thing", level), ref(token)]),
                         "<=>",
+                        # SNePS rejects an unparenthesised conjunction on the right of <=>.
                         expression((
                             coordinate(_get_components(token, reference, create_var("thing", level), level)),
                             "and",
                             predicate(token.lemma_, [create_var("thing", level)])
-                        ))
+                        ), wrap=True)
                     ))
                 )
             )
