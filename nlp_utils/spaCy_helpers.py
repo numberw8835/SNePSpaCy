@@ -171,8 +171,9 @@ def combine(input_expr: expression, negation: bool = False) -> expression:
     It extracts all predicates from the input expression, ignoring other logical constructs.
 
     If negation is False:
-    - Conjoins the extracted predicates in order, dropping exact duplicates. Repeating a
-      predicate name in a statement asserts each instance, so they must not become a disjunction.
+    - Conjoins the expression's top-level parts in order, dropping exact duplicates. Repeating a
+      predicate name in a statement asserts each instance, so they must not become a disjunction;
+      a disjunction the sentence states explicitly ("the cat or the dog") is kept as one part.
     Example: from expression(p(a) and q(c) and p(b)) -> p(a) and q(c) and p(b)
 
     If negation is True:
@@ -192,7 +193,8 @@ def combine(input_expr: expression, negation: bool = False) -> expression:
         return None
 
     if not negation:
-        return coordinate(list(dict.fromkeys(p for p in predicate_list if isinstance(p, predicate))), "and")
+        # Conjoin the top-level parts; an explicit disjunction ("the cat or the dog") stays one part.
+        return coordinate(list(dict.fromkeys(input_expr.segments)), "and")
 
     # Group predicates by their name (e.g., 'agent', 'like')
     groups = defaultdict(list)
@@ -413,8 +415,22 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
     conjs = [child for child in token.children if child.dep_ == "conj"]
 
     if conjs:
-        for conj in conjs:
-            components.extend(get_components(conj, role, reference, var, level+1))
+        alternatives = [get_components(conj, role, reference, var, level+1) for conj in conjs]
+        # spaCy chains a list ("the cat, the dog or the bird") and puts "or" on a later conjunct.
+        if any(c.dep_ == "cc" and c.lower_ == "or" for t in (token, *token.conjuncts) for c in t.children):
+            # "the cat or the dog": one of the alternatives holds, not all of them.
+            options = []
+            for option in [components] + alternatives:
+                if option:
+                    option = coordinate(option)
+                    if option.is_binary:
+                        option.wrap = True  # each alternative in its own parentheses
+                    options.append(option)
+            if len(options) > 1:
+                components = [coordinate(options, "or", wrap=True)]
+        else:
+            for alternative in alternatives:
+                components.extend(alternative)
 
     return components
 
