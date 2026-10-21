@@ -13,9 +13,12 @@ DEFAULT_DIRECTORY = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath
 _DONE = r"CPU time : [\d.]+"           # after every SNePSLOG command
 _PROMPT = r"\r\n: "                     # the SNePSLOG prompt that follows it
 _RESTARTS = r"Restart actions"          # Allegro's restart menu, shown after a rejected command
-_DEBUG_PROMPT = r"\] snepslog\(\d+\): "  # the debugger prompt that follows the menu
+_DEBUG_PROMPT = r"\] [\w-]+\(\d+\): "    # the debugger prompt that follows it (snepslog(2), snepsul(2), ...)
+_TOPLEVEL = r"[\w-]+\(\d+\): "           # the Lisp top-level prompt
+_CONTRADICTION = r"\(please type c, r or d\)\s*=><= "  # SNePS asking how to resolve a contradiction
 _CONTINUE = re.compile(r"(\d+): Continue with SNePSLOG")
-_WFF = re.compile(r"^\s*wff\d+!:\s*(.*?)\s*$", re.IGNORECASE)
+_WFF = re.compile(r"^\s*(?:wff|p)\d+!:\s*(.*?)\s*$", re.IGNORECASE)
+_LINE_LIMIT = 1000  # the terminal accepts at most 4095 bytes per line; longer statements are split
 
 
 class SnepsApiError(Exception):
@@ -28,6 +31,10 @@ class SnepsProcessError(SnepsApiError):
 
 class SnepsSyntaxError(SnepsApiError):
     """Raised for SNePS syntax errors."""
+    pass
+
+class SnepsContradictionError(SnepsSyntaxError):
+    """The statement contradicts the knowledge base; SNePS was told to discard it."""
     pass
 
 class SnepsInitializationError(SnepsApiError):
@@ -48,8 +55,8 @@ def _balanced(text):
 
 
 def _error_text(output):
-    """The message SNePS printed after 'Error:', on one line."""
-    match = re.search(r"error:?\s*(.*)", output, re.IGNORECASE | re.DOTALL)
+    """The message SNePS printed after 'Error:' (at the start of a line), on one line."""
+    match = re.search(r"^error:?\s*(.*)", output, re.IGNORECASE | re.DOTALL | re.MULTILINE)
     return " ".join((match.group(1) if match else output).split())
 
 
@@ -86,6 +93,7 @@ class sneps_api:
         self.terminate()
 
     def init(self):
+        self._safe_terminate_process()  # never leave an earlier SNePS process behind
         try:
             self.process = pexpect.spawn("sh Sneps-2.7.0.sh", cwd=self.sneps_directory, timeout=self.timeout,
                                          encoding="utf-8", codec_errors="replace")
@@ -109,24 +117,41 @@ class sneps_api:
         """Send one SNePSLOG command and return what it printed.
 
         If SNePS rejects the command, SNePS is returned to the SNePSLOG prompt and SnepsSyntaxError
-        carries SNePS's own message. If SNePS does not answer in time or exits, the process is shut
+        carries SNePS's own message. A statement that contradicts the knowledge base is discarded
+        (SnepsContradictionError). If SNePS does not answer in time or exits, the process is shut
         down (its output would no longer line up with the commands) and SnepsProcessError is raised.
         """
         self._ensure_process_is_alive()
         try:
-            self.process.sendline(line)
-            if self.process.expect([_DONE, _RESTARTS]) == 0:
+            self._send(line)
+            contradictions = []
+            while True:
+                matched = self.process.expect([_DONE, _RESTARTS, _CONTRADICTION])
+                if matched != 2:
+                    break
+                # Answer the contradiction menu instead of waiting: discard the new assertion.
+                contradictions.append(" ".join(self.process.before.split()))
+                self.process.sendline("d")
+            if matched == 0:
                 output = self.process.before
                 self.process.expect(_PROMPT)
+                if contradictions:
+                    raise SnepsContradictionError(f"SNePS discarded {line!r}: {contradictions[0]}")
                 return output
             message = _error_text(self.process.before)
             self.process.expect(_DEBUG_PROMPT)
             restart = _CONTINUE.search(self.process.before)
-            if restart is None:
-                raise SnepsProcessError(f"SNePS failed on {line!r} and cannot continue: {message}")
-            self.process.sendline(f":continue {restart.group(1)}")
-            self.process.expect(_DONE)
-            self.process.expect(_PROMPT)
+            if restart is not None:
+                self.process.sendline(f":continue {restart.group(1)}")
+                self.process.expect(_DONE)
+                self.process.expect(_PROMPT)
+            else:
+                # e.g. a SNePSUL error from ^(...): go back to the Lisp top level, then into SNePSLOG.
+                self.process.sendline(":continue 0")
+                self.process.expect(_TOPLEVEL)
+                self.process.sendline("(snepslog)")
+                self.process.expect("Welcome")
+                self.process.expect(_PROMPT)
             self._log(logging.WARNING, f"SNePS rejected {line!r}: {message}")
             raise SnepsSyntaxError(f"SNePS Error: {message} (input: {line})")
         except pexpect.exceptions.TIMEOUT as e:
@@ -136,6 +161,16 @@ class sneps_api:
         except pexpect.exceptions.EOF as e:
             self._safe_terminate_process()
             raise SnepsProcessError(f"SNePS exited while running {line!r}") from e
+
+    def _send(self, line):
+        # SNePSLOG reads a statement across lines, so a long one is sent in pieces cut at spaces.
+        while len(line.encode()) > _LINE_LIMIT:
+            cut = line.rfind(" ", 0, _LINE_LIMIT)
+            if cut <= 0:
+                raise SnepsSyntaxError(f"Statement has more than {_LINE_LIMIT} bytes without a space")
+            self.process.sendline(line[:cut])
+            line = line[cut:]
+        self.process.sendline(line)
 
     def clear_kb(self):
         """Sends the 'clearkb' command to SNePS."""
