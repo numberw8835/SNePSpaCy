@@ -1,5 +1,4 @@
 import copy
-from referencing import Specification
 
 class predicate:
     # Represents a logical predicate or a set of constants.
