@@ -69,7 +69,12 @@ def is_many(token: Token) -> bool:
 def is_group(token: Token) -> bool:
     """Checks whether the token is a group of items"""
     return (
-        token.tag_ in ["NNS", "NNPS"] and any(child.lemma_.lower() in ["some", "many", "few", "the"] for child in token.children))
+        token.tag_ in ["NNS", "NNPS"] and any(child.lemma_.lower() in ["some", "many", "few", "the"] for child in token.children)
+    ) and not any(is_count(child) for child in token.children)
+
+def is_count(token: Token) -> bool:
+    """Checks whether the token asks for a number: how many, how much"""
+    return token.lemma_.lower() in ["many", "much"] and any(child.lemma_.lower() == "how" for child in token.children)
 
 def is_definite(token: Token) -> bool:
     """Checks whether the token refers to something already known: the dog, John's dog"""
@@ -90,11 +95,30 @@ def tense(token: Token) -> str:
     auxiliaries = [child for child in token.children if child.dep_ in ["aux", "auxpass"]]
     if any(aux.lemma_.lower() == "will" for aux in auxiliaries):
         return "FUTURE"
-    elif token.tag_ == "VBD" or any(aux.tag_ == "VBD" for aux in auxiliaries):
+    elif token.tag_ == "VBD" or any(aux.tag_ == "VBD" or aux.lemma_.lower() == "have" for aux in auxiliaries):
         return "PAST"
     elif token.tag_ == "VBG":
         return "PRESENT"
     return None
+
+def wh_role(token: Token) -> str:
+    """Returns the role a wh-word asks about: where, when, why, how"""
+    return {"where": "location", "when": "time", "why": "cause", "how": "manner"}.get(token.lemma_.lower())
+
+def setting(prep: Token) -> str:
+    """Returns whether a prepositional phrase tells when (time) or where (location) something happens"""
+    place = get_dependant(prep, "pobj")
+    if place is None or place.ent_type_ == "PERSON" or is_pron(place):
+        return None
+    elif place.ent_type_ in ["DATE", "TIME"]:
+        return "time"
+    elif prep.lemma_.lower() in ["in", "at", "on", "to", "into", "near", "under", "behind", "above", "below", "inside", "outside", "beside"]:
+        return "location"
+    return None
+
+def is_manner(token: Token) -> bool:
+    """Checks whether the adverb tells how something happens: quickly, slowly"""
+    return token.lemma_.lower().endswith("ly") and token.lemma_.lower() not in ["only", "really", "nearly", "usually", "probably", "certainly", "actually", "finally", "likely", "hardly", "rarely", "recently"]
 
 def create_var(string: str, seed: int = 0, length: int = 5) -> str:
     """Creates a SHA-HASH of the given string with the given seed and length"""
@@ -151,7 +175,10 @@ def ref(token: Token) -> str:
     return memory.refs[token.i]
 
 def _ref(token: Token) -> str:
-    if is_distinct(token):
+    if token.tag_ in ["WP", "WDT", "WP$", "WRB"]:
+        clause = next((ancestor for ancestor in token.ancestors if ancestor.dep_ == "relcl"), None)
+        return ref(clause.head) if clause is not None else memory.new(token, "w")
+    elif is_distinct(token):
         return memory.mention(token, token.text)
     elif is_action(token):
         return memory.new(token, "e")
@@ -168,10 +195,8 @@ def _ref(token: Token) -> str:
     elif is_num(token):
         return token.text
     elif is_pron(token):
-        if token.tag_ in ["WP", "WDT"] and token.head.head.pos_ in ["NOUN", "PROPN"]:
-            return ref(token.head.head)
-        elif token.tag_ in ["WP", "WDT"] and memory.asking:
-            return memory.new(token, "w")
+        if token.lemma_.lower() in ["someone", "somebody", "something", "anyone", "anybody", "anything"]:
+            return memory.new(token, token.lemma_.lower()[0])
         elif token.lemma_.lower() in ["he", "she", "his", "her"]:
             known = memory.last("PROPN")
         elif token.lemma_.lower() in ["it", "its", "they", "their"]:
@@ -288,7 +313,9 @@ def _get_components(token: Token, reference: str=None, var: str=None, level: int
     true_ref = var if var else ref(token)
 
     for child in token.children:
-        if child.dep_ == "amod":
+        if child.dep_ == "amod" and is_count(child):
+            _components.append(predicate("quantity", [memory.new(child, "n"), true_ref]))
+        elif child.dep_ == "amod":
             mod = predicate(child.lemma_, [true_ref])
             mod = mod.negate() if has_dependant(child, "neg") else mod
             _components.append(mod)
@@ -352,7 +379,7 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
     if token is None:
         return components
     
-    elif is_distinct(token) or is_pron(token) or is_num(token):
+    elif is_distinct(token) or is_pron(token) or is_num(token) or token.tag_ == "WP$":
     
         components.append(predicate(role, [reference, ref(token)]))
         components.extend(_get_components(token, reference, var, level))
@@ -490,11 +517,18 @@ def main_snepslog(token: Token) -> expression:
 
         elif child.dep_ in roles:
             result.extend(get_components(child, roles[child.dep_], ref(token), None, seed))
+            if child.dep_ == "prep" and setting(child):
+                result.append(predicate(setting(child), [ref(token), ref(get_dependant(child, "pobj"))]))
             seed += len(result)
+
+        elif child.tag_ == "WRB" and wh_role(child):
+            result.append(predicate(wh_role(child), [ref(token), ref(child)]))
 
         elif child.dep_ in ["amod", "advmod"]:
             if not list(child.children):
                 result.append(predicate(child.lemma_, [ref(token)]))
+            if is_manner(child):
+                result.append(predicate("manner", [ref(token), child.lemma_]))
             result.extend(_get_components(child, None, ref(token), seed))
 
         elif child.dep_ == "conj":
