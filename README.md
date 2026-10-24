@@ -34,7 +34,7 @@ This system leverages the SNePS knowledge representation and reasoning system to
 1.  Ensure Python 3.11.11 and pip are installed on your system.
 2.  Install the necessary Python packages using the following command:
     ```bash
-    pip install click prompt_toolkit spacy referencing && python -m spacy download en_core_web_trf
+    pip install click prompt_toolkit spacy graphviz referencing && python -m spacy download en_core_web_trf
     git submodule update --init && pip install -e PySNePS
     ```
 
@@ -59,6 +59,16 @@ The primary way to interact with the system is through the `main.py` script.
     * `exit` / `quit` / `Ctrl+C` / `Ctrl+D`: Terminates the console application.
     * `Ctrl+L`: Clears the console screen.
 
+### Grapher 🌳
+
+`grapher.py` draws the dependency tree of a statement from top to bottom, and prints it as LaTeX to copy into your examples. It needs [Graphviz](https://graphviz.org) installed.
+
+```bash
+python project/grapher.py
+```
+* Each statement opens its tree in your image viewer and prints a `forest` tree; an empty statement exits.
+* The LaTeX needs `\usepackage{forest}` and `\usepackage[svgnames]{xcolor}`.
+
 ### Direct Access with `PySNePS` 🐍
 
 For more programmatic control or integration into other Python projects, `PySNePS` can be used directly.
@@ -76,6 +86,7 @@ For more programmatic control or integration into other Python projects, `PySNeP
 ## Core Components 🔩
 
 * **`project/main.py`**: The main entry point for the CLI application. It uses the `click` library for command-line argument parsing and `prompt_toolkit` for an enhanced interactive console experience.
+* **`project/grapher.py`**: Draws spaCy dependency trees with `graphviz` and prints them as LaTeX (`forest`), to look for patterns in how sentences are parsed.
 * **`project/PySNePS/`**: SNePS 2.8 rewritten in Python, as a git submodule. `main.py` uses its `Network` class to tell, ask, list and clear the knowledge base.
 * **`project/semantic_parser/core.py`**: Contains the `snepslog` class responsible for transcribing natural language into SNePSLOG. It utilizes `spacy` for linguistic analysis.
 * **`project/logic_utls/logica.py`**: Defines Python classes for representing logical constructs such as predicates (`predicate`), logical expressions (`expression` including binary and atomic forms), and quantifiers (`ForAll`, `Exists`). It provides methods for logical operations like negation and normalization, as well as a function for `intentionalize` to transform universal intentions.
