@@ -52,10 +52,11 @@ The primary way to interact with the system is through the `main.py` script.
     * `--api-mode off`: Natural language input will only be transcribed and displayed. SNePS commands will indicate they are skipped, and no interaction with the SNePS engine will occur.
 
 * **Available Commands within the Console**:
-    * `<Natural Language Input>`: Type any natural language sentence. It will be transcribed. If API mode is 'on', it will also be asserted into SNePS.
+    * `<Natural Language Input>`: Type any natural language sentence. It will be transcribed. If API mode is 'on', it will also be asserted into SNePS. Sentences are read in context: "the apple" and "he" refer back to what was mentioned before.
+    * `<Question?>`: A sentence ending in `?`, like "Who ate the pear?" or "Is Socrates mortal?", is transcribed with variables for what is asked and asked instead; SNePS answers with the facts it knows or can infer. Requires API mode to be 'on'.
     * `ask <query>`: Submits a query to the SNePS knowledge base. This command requires API mode to be 'on'. The `<query>` should be in SNePSLOG syntax.
     * `list-wffs`: Lists all well-formed formulas (wffs) currently in the SNePS knowledge base. Requires API mode to be 'on'.
-    * `clearkb`: Clears all information from the SNePS knowledge base. Requires API mode to be 'on'.
+    * `clearkb`: Clears all information from the SNePS knowledge base, and forgets what was mentioned. Requires API mode to be 'on'.
     * `exit` / `quit` / `Ctrl+C` / `Ctrl+D`: Terminates the console application.
     * `Ctrl+L`: Clears the console screen.
 

@@ -18,6 +18,7 @@ def console(api_mode):
     """
     A command-line interface to interact with a SNePS knowledge base.
     You can input natural language, which will be transcribed and asserted (if API mode is 'on').
+    Questions (ending in '?') are transcribed and asked instead.
     Alternatively, use specific commands (behavior depends on API mode):
     - ask <query>: Query the knowledge base.
     - list-wffs: List all well-formed formulas.
@@ -85,6 +86,7 @@ def console(api_mode):
                 if api_mode == 'on':
                     try:
                         net.tell("clearkb")
+                        engine.forget()
                         click.echo(f"\n\t<C> Knowledge base cleared.\n")
                     except SNePSError as e:
                         click.echo(f"\n\t<!> SNePS Error during 'clearkb': {e}\n")
@@ -151,8 +153,16 @@ def console(api_mode):
 
                     if api_mode == 'on':
                         try:
-                            net.tell(f"{results_str}.")
-                            click.echo(f"\n\t<I> Informed SNePS with: {results_str}\n")
+                            if user_input_trimmed.endswith("?"):
+                                answers = [net.node_text(node) for node in net.ask(results_str)]
+                                if answers:
+                                    for ans in answers:
+                                        click.echo(f"\n\t<A> {ans}\n")
+                                else:
+                                    click.echo(f"\n\t<A> No answer found.\n")
+                            else:
+                                net.tell(f"{results_str}!") # '!' also infers forward, so rules use facts told after a question
+                                click.echo(f"\n\t<I> Informed SNePS with: {results_str}\n")
                         except SNePSError as e:
                             click.echo(f"\n\t<!> SNePS Error informing '{results_str}': {e}\n")
                         except Exception:

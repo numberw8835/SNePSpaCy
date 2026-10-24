@@ -55,23 +55,46 @@ def is_particle(token: Token) -> bool:
     """Checks whether the token is a positional marker"""
     return token.pos_ == "ADP"
 
+def is_generic(token: Token) -> bool:
+    """Checks whether the sentence speaks of things in general (Dogs bark), not of an event (Dogs barked)"""
+    return token.sent.root.tag_ in ["VBZ", "VBP"]
+
 def is_many(token: Token) -> bool:
     """Checks whether the token is a plural quantifier"""
     return (
-        (token.tag_ in ["NNS", "NNPS"]) or 
+        (token.tag_ in ["NNS", "NNPS"] and token.dep_ != "attr" and is_generic(token)) or
         (any(child.lemma_.lower() in ["all", "forall", "every", "each"] for child in token.children))
-    ) and not (any(child.lemma_.lower() in ["some", "many", "few", "the"] for child in token.children))
+    ) and not (any(child.lemma_.lower() in ["some", "many", "few", "the"] or child.dep_ == "nummod" for child in token.children))
 
 def is_group(token: Token) -> bool:
     """Checks whether the token is a group of items"""
     return (
         token.tag_ in ["NNS", "NNPS"] and any(child.lemma_.lower() in ["some", "many", "few", "the"] for child in token.children))
 
+def is_definite(token: Token) -> bool:
+    """Checks whether the token refers to something already known: the dog, John's dog"""
+    return any(child.lemma_.lower() == "the" or child.dep_ == "poss" for child in token.children)
+
+def is_condition(token: Token) -> bool:
+    """Checks whether the token is the head of an if clause"""
+    return token.dep_ == "advcl" and any(child.dep_ == "mark" and child.lemma_.lower() == "if" for child in token.children)
+
 def is_not(token: Token) -> bool:
     """Checks whether the token or its children indicate negation."""
     if token.dep_ == "neg" or token.lemma_.lower() in ["not", "no", "never"]:
         return True
     return any(is_not(child) for child in token.children if child.dep_ not in ["acl", "relcl", "ccomp", "xcomp", "advcl", "conj"])
+
+def tense(token: Token) -> str:
+    """Returns when the event of the token happens, or None for the present"""
+    auxiliaries = [child for child in token.children if child.dep_ in ["aux", "auxpass"]]
+    if any(aux.lemma_.lower() == "will" for aux in auxiliaries):
+        return "FUTURE"
+    elif token.tag_ == "VBD" or any(aux.tag_ == "VBD" for aux in auxiliaries):
+        return "PAST"
+    elif token.tag_ == "VBG":
+        return "PRESENT"
+    return None
 
 def create_var(string: str, seed: int = 0, length: int = 5) -> str:
     """Creates a SHA-HASH of the given string with the given seed and length"""
@@ -80,29 +103,116 @@ def create_var(string: str, seed: int = 0, length: int = 5) -> str:
     hex_dig = hash_object.hexdigest()
     return hex_dig[:length]
 
-def ref(token: Token, seed: int = 0, length: int = 5) -> str:
-    """Returns a reference var to the given token"""
+class discourse:
+    """Remembers the referents mentioned so far, so that later mentions refer to the same ones"""
+    def __init__(self):
+        self.forget()
+
+    def forget(self):
+        self.used = set()
+        self.mentions = []
+        self.read(None)
+
+    def read(self, sentence):
+        """Starts a new sentence; a question gets variables instead of new referents"""
+        self.refs = {}
+        self.existentials = []
+        self.asking = sentence is not None and sentence.text.strip().endswith("?")
+
+    def new(self, token: Token, prefix: str, existential: bool = True) -> str:
+        """Returns a reference that no other referent has"""
+        seed = 0
+        while prefix + create_var(token.text, seed, 4) in self.used:
+            seed += 1
+        new_ref = prefix + create_var(token.text, seed, 4)
+        self.used.add(new_ref)
+        if self.asking:
+            return "?" + new_ref
+        if existential:
+            self.existentials.append(new_ref)
+        return new_ref
+
+    def mention(self, token: Token, token_ref: str) -> str:
+        """Remembers that the token refers to token_ref"""
+        if not self.asking:
+            self.mentions.append((token.pos_, token.lemma_, token_ref))
+        return token_ref
+
+    def last(self, pos: str, lemma: str = None) -> str:
+        """Returns the most recently mentioned referent with the given part of speech and lemma"""
+        return next((r for p, l, r in reversed(self.mentions) if p == pos and lemma in [None, l]), None)
+
+memory = discourse()
+
+def ref(token: Token) -> str:
+    """Returns a reference var to the given token, the same for every mention of the same referent"""
+    if token.i not in memory.refs:
+        memory.refs[token.i] = _ref(token)
+    return memory.refs[token.i]
+
+def _ref(token: Token) -> str:
     if is_distinct(token):
-        return token.text
+        return memory.mention(token, token.text)
     elif is_action(token):
-        return "e" + create_var(token.text, seed, length-1)
+        return memory.new(token, "e")
     elif is_state(token):
-        return "s" + create_var(token.text, seed, length-1)
+        return memory.new(token, "s")
     elif is_thing(token):
-        return token.text[0] + create_var(token.text, seed, length-1)
+        if is_many(token):
+            return memory.new(token, token.text[0], existential=False)
+        definite = is_definite(token)
+        known = memory.last("NOUN", token.lemma_) if definite else None
+        return memory.mention(token, known or memory.new(token, token.text[0], existential=not (definite or is_group(token))))
     elif is_modifier(token):
-        return "m" + create_var(token.text, seed, length-1)
+        return memory.new(token, "m")
     elif is_num(token):
         return token.text
     elif is_pron(token):
-        if token.head.head.pos_ in ["NOUN", "PROPN"]:
+        if token.tag_ in ["WP", "WDT"] and token.head.head.pos_ in ["NOUN", "PROPN"]:
             return ref(token.head.head)
+        elif token.tag_ in ["WP", "WDT"] and memory.asking:
+            return memory.new(token, "w")
+        elif token.lemma_.lower() in ["he", "she", "his", "her"]:
+            known = memory.last("PROPN")
+        elif token.lemma_.lower() in ["it", "its", "they", "their"]:
+            known = memory.last("NOUN")
         else:
-            return token.lemma_.lower()[0] + create_var(token.lemma_.lower(), seed, length-1)
+            known = None
+        return known or token.lemma_.lower()[0] + create_var(token.lemma_.lower(), 0, 4)
     elif is_particle(token):
-        return "p" + create_var(token.text, seed, length-1)
+        return memory.new(token, "p")
     else:
         raise Exception(f"({token}, {token.pos_}) Is an unknown token type")
+
+def existentials(formula) -> list:
+    """Returns the references in the formula that only say something exists: events, states and things introduced by a/an"""
+    args = {arg for pred in formula._get_all_predicates() for arg in pred.args}
+    return [arg for arg in memory.existentials if arg in args]
+
+def predication(components: list) -> list:
+    """What a state means: whatever is true of its attribute or content is true of what it refers to"""
+    preds = [pred for component in components for pred in component._get_all_predicates()]
+    subjects = [pred.args[1] for pred in preds if pred.predicate_name == "reference"]
+    values = [pred.args[1] for pred in preds if pred.predicate_name in ["attribute", "content"]]
+    stated = []
+    for pred in preds:
+        if len(pred.args) == 1 and pred.args[0] in values:
+            for subject in subjects:
+                same = predicate(pred.predicate_name, [subject])
+                stated.append(same.negate() if pred.neg else same)
+    return stated
+
+def conditional(condition, consequence) -> ForAll:
+    """Returns the rule: whenever the condition happens, the consequence happens too"""
+    rule = expression((condition, "=>", consequence), wrap=True)
+    variables = existentials(condition)
+    if not variables:
+        return rule
+    rule = ForAll(variables, rule)
+    for arg in existentials(consequence):
+        if arg not in variables:
+            rule.skolemize_arg(arg, variables)
+    return rule
 
 def get_actors(token: Token) -> list:
     """Returns a list of actors of the given token"""
@@ -171,7 +281,7 @@ def coordinate(input: list, operator: str='and', wrap=False) -> expression:
             result = expression((result, operator, predicate), wrap=wrap)
         return result
 
-def _get_components(token: Token, reference: str=None, var: str=None, level: int=0, main_level: int=0) -> list:
+def _get_components(token: Token, reference: str=None, var: str=None, level: int=0) -> list:
     _components = []
     if token is None:
         return _components
@@ -182,37 +292,39 @@ def _get_components(token: Token, reference: str=None, var: str=None, level: int
             mod = predicate(child.lemma_, [true_ref])
             mod = mod.negate() if has_dependant(child, "neg") else mod
             _components.append(mod)
-            other = _get_components(child, reference, var, level, main_level)
+            other = _get_components(child, reference, var, level)
             if other:
                 _components.extend(other)
         elif child.dep_ == "advmod":
             mod = predicate(child.lemma_, [true_ref, token.lemma_])
             mod = mod.negate() if has_dependant(child, "neg") else mod
             _components.append(mod)
-            other = _get_components(child, reference, var, level, main_level)
+            other = _get_components(child, reference, var, level)
             if other:
                 _components.extend(other)
         elif child.dep_ == "acl":
-            other = main_snepslog(child, main_level+1)
+            other = main_snepslog(child)
             if other:
                 _components.append(predicate("concerns", [true_ref, f"({other})"]))
         elif child.dep_ == "relcl":
-            other = main_snepslog(child, main_level+1)
+            other = main_snepslog(child)
             if other:
                 _components.append(predicate("concerns", [true_ref, f"({other})"]))
         elif child.dep_ == "xcomp":
-            other = main_snepslog(child, main_level+1)
+            other = main_snepslog(child)
             if other:
                 _components.append(predicate("concerns", [true_ref, f"({other})"]))
         elif child.dep_ == "ccomp":
-            other = main_snepslog(child, main_level+1)
+            other = main_snepslog(child)
             if other:
                 _components.append(predicate("concerns", [true_ref, f"({other})"]))
         elif child.dep_ == "prep":
-            _components.extend(get_components(child, child.text, true_ref, var, level, main_level))
+            _components.extend(get_components(child, child.text, true_ref, var, level))
+        elif child.dep_ == "poss":
+            _components.extend(get_components(child, "possessor", true_ref, None, level))
         elif child.dep_ == "compound":
             _components.append(predicate(child.lemma_, [true_ref]))
-            other = _get_components(child, reference, true_ref, level, main_level)
+            other = _get_components(child, reference, true_ref, level)
             if other:
                 _components.extend(other)
         elif child.dep_ == "det": # Potential for change
@@ -226,11 +338,15 @@ def _get_components(token: Token, reference: str=None, var: str=None, level: int
             continue
         elif child.dep_ == "mark":
             continue
+        elif child.dep_ == "case":
+            continue
+        elif child.dep_ == "punct":
+            continue
         else:
             print(f"Warning: {child.dep_} not implemented BASE_2")
     return _components
 
-def get_components(token: Token, role: str=None, reference: str=None, var: str=None, level: int=0, main_level: int=0) -> list:
+def get_components(token: Token, role: str=None, reference: str=None, var: str=None, level: int=0) -> list:
     """Returns a list of modifiers of the given token"""
     components = []
     if token is None:
@@ -239,7 +355,7 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
     elif is_distinct(token) or is_pron(token) or is_num(token):
     
         components.append(predicate(role, [reference, ref(token)]))
-        components.extend(_get_components(token, reference, var, level, main_level))
+        components.extend(_get_components(token, reference, var, level))
     
     elif is_thing(token):
 
@@ -252,7 +368,7 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
                         predicate(token.lemma_, [ref(token)]),
                         "=>",
                         expression((
-                            coordinate(_get_components(token, reference, ref(token), level, main_level)),
+                            coordinate(_get_components(token, reference, ref(token), level)),
                             "and", 
                             predicate(role, [reference, ref(token)])
                         ))
@@ -269,7 +385,7 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
                         predicate("member", [create_var("thing", level), ref(token)]),
                         "<=>",
                         expression((
-                            coordinate(_get_components(token, reference, create_var("thing", level), level, main_level)),
+                            coordinate(_get_components(token, reference, create_var("thing", level), level)),
                             "and",
                             predicate(token.lemma_, [create_var("thing", level)])
                         ))
@@ -290,13 +406,13 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
 
         else:
             components.append(predicate(role, [reference, ref(token)]))
-            components.append(predicate(token.text, [ref(token)])) # Add the token it self: boy(b) or cat(c)
-            components.extend(_get_components(token, reference, var, level, main_level))
+            components.append(predicate(token.lemma_, [ref(token)])) # Add the token it self: boy(b) or cat(c)
+            components.extend(_get_components(token, reference, var, level))
 
     elif is_action(token) or is_state(token):
 
-        components.append(predicate(role, [reference, ref(token, main_level+1)]))
-        components.append(main_snepslog(token, main_level+1))
+        components.append(predicate(role, [reference, ref(token)]))
+        components.append(main_snepslog(token))
 
     elif is_modifier(token):
 
@@ -305,22 +421,22 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
             cont = next(next(token.children, None).children, None)
             pred = pred + "_" + next(token.children, None).text
             components.append(predicate(role, [reference, ref(token)]))
-            components.extend(get_components(cont, pred, ref(token), var, level, main_level))
+            components.extend(get_components(cont, pred, ref(token), var, level))
         else:
             components.append(predicate(role, [reference, ref(token)]))
             components.append(predicate(token.text, [ref(token)]))
-            components.extend(_get_components(token, reference, var, level, main_level))
+            components.extend(_get_components(token, reference, var, level))
 
     elif is_particle(token):
 
         skip = next((child for child in token.children), True)
         if skip:
-            components.extend(get_components(skip, role, reference, var, level, main_level))
+            components.extend(get_components(skip, role, reference, var, level))
 
     elif token.pos_ in ["SCONJ"]:
         skip = next((child for child in token.children), True)
         if skip:
-            components.extend(get_components(skip, token.text, reference, var, level, main_level))    
+            components.extend(get_components(skip, token.text, reference, var, level))
     else:
         # raise Exception(f"({token}, {token.pos_}) Is an unknown token type, please account for it")
         print(f"Warning: ({token}, {token.pos_}) Is an unknown BASE_1 token type, please account for it")
@@ -328,22 +444,27 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
     conjs = [child for child in token.children if child.dep_ == "conj"]
 
     if conjs:
-        for conj in conjs:
-            components.extend(get_components(conj, role, reference, var, level+1, main_level))
+        others = [get_components(conj, role, reference, var, level+1) for conj in conjs]
+        connectives = [child.lemma_.lower() for head in [token] + conjs for child in head.children if child.dep_ == "cc"]
+        if "or" in connectives:
+            components = [coordinate([coordinate(option, wrap=True) for option in [components] + others], operator="or", wrap=True)]
+        else:
+            for other in others:
+                components.extend(other)
 
     return components
 
-def main_snepslog(token: Token, level: int=0) -> expression:
+def main_snepslog(token: Token) -> expression:
 
     if token is None:
         raise Exception("No token provided")
     seed = 0
-    name = token.text if not is_state(token) else "state"
+    name = token.lemma_ if not is_state(token) else "state"
     negation = is_not(token)
-    result = [predicate(name, [ref(token, seed=level)])]
+    result = [predicate(name, [ref(token)])]
     conjunct = None
     connective = None
-    extra =[]
+    condition = None
 
     for child in token.children:
         
@@ -364,29 +485,29 @@ def main_snepslog(token: Token, level: int=0) -> expression:
             "pobj": "object",
         }
 
-        if child.dep_ in ["nsubjpass", "agent"]:
-            extra.append(predicate("culminate", [ref(token, seed=level), "PAST"]))
-        elif token.tag_ == "VBG":
-            extra.append(predicate("culminate", [ref(token, seed=level), "PRESENT"]))
-        elif child.dep_ == "aux" and child.text.lower() == "will":
-                extra.append(predicate("culminate", [ref(token, seed=level), "FUTURE"]))
-                
-        if child.dep_ in roles:
-            result.extend(get_components(child, roles[child.dep_], ref(token, seed=level), None, seed, level))
+        if is_condition(child):
+            condition = main_snepslog(child)
+
+        elif child.dep_ in roles:
+            result.extend(get_components(child, roles[child.dep_], ref(token), None, seed))
             seed += len(result)
 
         elif child.dep_ in ["amod", "advmod"]:
             if not list(child.children):
-                result.append(predicate(child.lemma_, [ref(token, seed=level)]))
-            result.extend(_get_components(child, None, ref(token, seed=level), seed, level))
+                result.append(predicate(child.lemma_, [ref(token)]))
+            result.extend(_get_components(child, None, ref(token), seed))
 
         elif child.dep_ == "conj":
-            conjunct = main_snepslog(child, level+1)
+            conjunct = main_snepslog(child)
 
         elif child.dep_ == "cc":
             connective = child.text
 
-    result.extend(list(dict.fromkeys(extra)))
+    if is_state(token) and not negation:
+        result.extend(predication(result))
+    when = tense(token)
+    if when:
+        result.append(predicate("culminate", [ref(token), when]))
     result = intentionalize(coordinate(result))
 
     if list(result.quantifiers):
@@ -394,16 +515,20 @@ def main_snepslog(token: Token, level: int=0) -> expression:
 
             if isinstance(quant, ForAll):
                 if not negation:
-                    quant.skolemize_arg(ref(token, seed=level), list(dict.fromkeys(quant.variables)))
+                    for arg in existentials(quant.formula):
+                        if arg not in quant.variables:
+                            quant.skolemize_arg(arg, list(dict.fromkeys(quant.variables)))
                 else:
                     if isinstance(quant.formula, expression) and quant.formula.operator == "=>":
-                        quant.variables.append(ref(token, seed=level))
+                        quant.variables.extend(arg for arg in existentials(quant.formula) if arg not in quant.variables)
                         if hasattr(quant.formula.operant_2, "negate") and isinstance(quant.formula.operant_2, expression):
                             quant.formula.operant_2 = combine(quant.formula.operant_2, negation)
     else:
         if negation:
             result = combine(result, negation)
-            result = ForAll([ref(token, seed=level)], result)
+            result = ForAll(existentials(result) or [ref(token)], result)
+    if condition:
+        result = conditional(condition, result)
     if conjunct:
         result = expression((result, connective, conjunct))
     return result

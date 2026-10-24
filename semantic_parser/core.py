@@ -1,6 +1,6 @@
 import spacy
-from spacy.tokens import Token
-from nlp_utils.spaCy_helpers import get_root, main_snepslog
+from spacy.tokens import Span
+from nlp_utils.spaCy_helpers import get_root, main_snepslog, memory
 
 class snepslog:
     def __init__(self, model="en_core_web_trf"):
@@ -9,7 +9,13 @@ class snepslog:
     
     def transcribe(self, passage):
         doc = self.nlp(passage)
-        return self._sneps(get_root(doc))
+        formulas = [self._sneps(sentence) for sentence in doc.sents]
+        return formulas[0] if len(formulas) == 1 else " and ".join(f"({formula})" for formula in formulas)
 
-    def _sneps(self, token: Token) -> str:
-        return str(main_snepslog(token))
+    def forget(self):
+        """Forgets the referents mentioned so far, for a new knowledge base"""
+        memory.forget()
+
+    def _sneps(self, sentence: Span) -> str:
+        memory.read(sentence)
+        return str(main_snepslog(get_root(sentence)))
