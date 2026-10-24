@@ -71,7 +71,7 @@ def is_not(token: Token) -> bool:
     """Checks whether the token or its children indicate negation."""
     if token.dep_ == "neg" or token.lemma_.lower() in ["not", "no", "never"]:
         return True
-    return any(is_not(child) for child in token.children)
+    return any(is_not(child) for child in token.children if child.dep_ not in ["acl", "relcl", "ccomp", "xcomp", "advcl", "conj"])
 
 def create_var(string: str, seed: int = 0, length: int = 5) -> str:
     """Creates a SHA-HASH of the given string with the given seed and length"""
