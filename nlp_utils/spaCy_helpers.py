@@ -212,7 +212,7 @@ def _get_components(token: Token, reference: str=None, var: str=None, level: int
             _components.extend(get_components(child, child.text, true_ref, var, level, main_level))
         elif child.dep_ == "compound":
             _components.append(predicate(child.lemma_, [true_ref]))
-            other = _get_components(child, reference, var, level, main_level)
+            other = _get_components(child, reference, true_ref, level, main_level)
             if other:
                 _components.extend(other)
         elif child.dep_ == "det": # Potential for change
@@ -305,8 +305,7 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
             cont = next(next(token.children, None).children, None)
             pred = pred + "_" + next(token.children, None).text
             components.append(predicate(role, [reference, ref(token)]))
-            components.append(predicate(pred, [ref(token), cont.text]))
-            components.extend(_get_components(cont, reference, var, level, main_level))
+            components.extend(get_components(cont, pred, ref(token), var, level, main_level))
         else:
             components.append(predicate(role, [reference, ref(token)]))
             components.append(predicate(token.text, [ref(token)]))
