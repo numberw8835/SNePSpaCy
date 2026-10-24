@@ -1,0 +1,3 @@
+[submodule "PySNePS"]
+	path = PySNePS
+	url = https://github.com/numberw8835/PySNePS.git

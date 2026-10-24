@@ -35,7 +35,7 @@ This system leverages the SNePS knowledge representation and reasoning system to
 2.  Install the necessary Python packages using the following command:
     ```bash
     pip install click prompt_toolkit spacy referencing && python -m spacy download en_core_web_trf
-    pip install -e PySNePS
+    git submodule update --init && pip install -e PySNePS
     ```
 
 ## Usage 🚀
@@ -76,12 +76,11 @@ For more programmatic control or integration into other Python projects, `PySNeP
 ## Core Components 🔩
 
 * **`project/main.py`**: The main entry point for the CLI application. It uses the `click` library for command-line argument parsing and `prompt_toolkit` for an enhanced interactive console experience.
-* **`project/PySNePS/`**: SNePS 2.8 rewritten in Python. `main.py` uses its `Network` class to tell, ask, list and clear the knowledge base.
+* **`project/PySNePS/`**: SNePS 2.8 rewritten in Python, as a git submodule. `main.py` uses its `Network` class to tell, ask, list and clear the knowledge base.
 * **`project/semantic_parser/core.py`**: Contains the `snepslog` class responsible for transcribing natural language into SNePSLOG. It utilizes `spacy` for linguistic analysis.
 * **`project/logic_utls/logica.py`**: Defines Python classes for representing logical constructs such as predicates (`predicate`), logical expressions (`expression` including binary and atomic forms), and quantifiers (`ForAll`, `Exists`). It provides methods for logical operations like negation and normalization, as well as a function for `intentionalize` to transform universal intentions.
 * **`project/nlp_utils/spaCy_helpers.py`**: A suite of helper functions that use `spacy` to analyze tokens from a parsed sentence. Functions include identifying token types (e.g., `is_action`, `is_thing`), dependencies (`get_dependant`), and transforming them into logical components for SNePSLOG using the classes from `logic_utls.logica.py`.
-* **`project/Sneps-Linux-Exe-2.7.0/`**: This directory contains the SNePS 2.7.0 executable (`Sneps-2.7.0.sh`) and related files, including READMEs and Java API components (though the Python API is the primary interaction method for this project).
 
 ## Intellectual Property ©™️
 
-SNePS is a creation of the SNePS Research Group. All intellectual rights and copyrights pertaining to the SNePS system belong to the SNePS Research Group and the SNePS foundation. We extend our sincere gratitude to the SNePS foundation for their invaluable contribution to the field of knowledge representation and reasoning. (uploaded:project/Sneps-Linux-Exe-2.7.0/SNEPS_EXE_README.txt)
+SNePS is a creation of the SNePS Research Group. All intellectual rights and copyrights pertaining to the SNePS system belong to the SNePS Research Group and the SNePS foundation. We extend our sincere gratitude to the SNePS foundation for their invaluable contribution to the field of knowledge representation and reasoning. (see project/PySNePS/COPYING)
