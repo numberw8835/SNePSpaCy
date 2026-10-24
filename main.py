@@ -4,8 +4,7 @@ import traceback
 # Assuming semantic_parser.core.snepslog is in a location Python can find
 from semantic_parser.core import snepslog
 
-# Assuming sneps_wrapper.sneps_api refers to the sneps_api.py file
-from sneps_wrapper.sneps_api import sneps_api, SnepsApiError, SnepsSyntaxError
+from sneps import Network, SNePSError
 
 # For advanced terminal features
 from prompt_toolkit import PromptSession
@@ -34,7 +33,7 @@ def console(api_mode):
         traceback.print_exc()
         return
 
-    api = sneps_api(enable_logging=False)
+    net = None
 
     # Setup for advanced prompt
     history = InMemoryHistory()
@@ -51,7 +50,7 @@ def console(api_mode):
 
     try:
         if api_mode == 'on':
-            api.init() # Initialize SNePS API only if mode is 'on'
+            net = Network(output=False) # Initialize SNePS only if mode is 'on'
             click.echo("SNePS API initialized.")
         else:
             click.echo("SNePS API mode is OFF. API will not be initialized or called.")
@@ -85,12 +84,10 @@ def console(api_mode):
             elif user_input_lower == "clearkb":
                 if api_mode == 'on':
                     try:
-                        if api.clear_kb():
-                            click.echo(f"\n\t<C> Knowledge base cleared.\n")
-                        else:
-                            click.echo(f"\n\t<!> Failed to clear knowledge base (API returned false).\n")
-                    except SnepsApiError as e:
-                        click.echo(f"\n\t<!> API Error during 'clearkb': {e}\n")
+                        net.tell("clearkb")
+                        click.echo(f"\n\t<C> Knowledge base cleared.\n")
+                    except SNePSError as e:
+                        click.echo(f"\n\t<!> SNePS Error during 'clearkb': {e}\n")
                     except Exception:
                         click.echo(f"\n\t<!> An unexpected error occurred during 'clearkb':\n")
                         traceback.print_exc()
@@ -106,16 +103,14 @@ def console(api_mode):
                 if query:
                     if api_mode == 'on':
                         try:
-                            answers = api.ask(query)
+                            answers = [net.node_text(node) for node in net.ask(query)]
                             if answers:
                                 for ans in answers:
                                     click.echo(f"\n\t<A> {ans}\n")
                             else:
                                 click.echo(f"\n\t<A> No answer found or query did not produce assertional wffs.\n")
-                        except SnepsSyntaxError as e:
-                            click.echo(f"\n\t<!> Syntax Error: {e}\n")
-                        except SnepsApiError as e:
-                            click.echo(f"\n\t<!> API Error: {e}\n")
+                        except SNePSError as e:
+                            click.echo(f"\n\t<!> SNePS Error: {e}\n")
                         except Exception:
                             click.echo(f"\n\t<!> An unexpected error occurred during 'ask':\n")
                             traceback.print_exc()
@@ -127,14 +122,14 @@ def console(api_mode):
             elif user_input_lower == "list-wffs" or user_input_lower == "list wffs":
                 if api_mode == 'on':
                     try:
-                        wffs = api.list_wffs()
+                        wffs = [net.node_text(node) for node in net.all_nodes() if node.asupport]
                         if wffs:
                             for wff in wffs:
                                 click.echo(f"\n\t<L> {wff}\n")
                         else:
                             click.echo(f"\n\t<L> No wffs found in the knowledge base.\n")
-                    except SnepsApiError as e:
-                        click.echo(f"\n\t<!> API Error during 'list-wffs': {e}\n")
+                    except SNePSError as e:
+                        click.echo(f"\n\t<!> SNePS Error during 'list-wffs': {e}\n")
                     except Exception:
                         click.echo(f"\n\t<!> An unexpected error occurred during 'list-wffs':\n")
                         traceback.print_exc()
@@ -156,12 +151,10 @@ def console(api_mode):
 
                     if api_mode == 'on':
                         try:
-                            api.inform(results_str)
+                            net.tell(f"{results_str}.")
                             click.echo(f"\n\t<I> Informed SNePS with: {results_str}\n")
-                        except SnepsSyntaxError as e:
-                            click.echo(f"\n\t<!> Syntax Error informing '{results_str}': {e}\n")
-                        except SnepsApiError as e:
-                            click.echo(f"\n\t<!> API Error informing '{results_str}': {e}\n")
+                        except SNePSError as e:
+                            click.echo(f"\n\t<!> SNePS Error informing '{results_str}': {e}\n")
                         except Exception:
                             click.echo(f"\n\t<!> An unexpected error occurred while informing SNePS:\n")
                             traceback.print_exc()
@@ -172,19 +165,13 @@ def console(api_mode):
                     click.echo(f"\t<!> An error occurred processing the input:\n")
                     traceback.print_exc()
 
-    except SnepsApiError as e:
+    except SNePSError as e:
         if api_mode == 'on': # Only relevant if we tried to use the API
-            click.echo(f"[!!] A critical SNePS API error occurred: {e}")
+            click.echo(f"[!!] A critical SNePS error occurred: {e}")
             traceback.print_exc()
     except Exception:
         click.echo(f"[!!] An unexpected critical error occurred:")
         traceback.print_exc()
-    finally:
-        if api_mode == 'on' and hasattr(api, 'process') and api.process and api.process.isalive():
-            api.terminate()
-            click.echo("SNePS API terminated.")
-        elif api_mode == 'on' and hasattr(api, 'process'):
-            click.echo("SNePS API was not running or already terminated (when trying to terminate).")
 
 if __name__ == '__main__':
     console()

@@ -9,7 +9,7 @@ This project provides a command-line interface and a Python API to interact with
 - [Installation 🛠️](#installation-%EF%B8%8F)
 - [Usage 🚀](#usage-)
   - [Command-Line Interface (CLI) ⌨️](#command-line-interface-cli-%EF%B8%8F)
-  - [Direct Access with `sneps_api.py` 🐍](#direct-access-with-sneps_apipy-)
+  - [Direct Access with `PySNePS` 🐍](#direct-access-with-pysneps-)
 - [Core Components 🔩](#core-components-)
 - [Intellectual Property ©™️](#intellectual-property-%EF%B8%8F)
 
@@ -18,7 +18,7 @@ This project provides a command-line interface and a Python API to interact with
 This system leverages the SNePS knowledge representation and reasoning system to perform semantic parsing of natural language. The core functionality involves:
 
 * **Natural Language Transcription**: Converting user input into SNePSLOG, a logical representation. This is handled by the `semantic_parser.core.snepslog` class, which utilizes `spaCy` for NLP tasks like root identification and dependency parsing (uploaded:project/nlp_utils/spaCy_helpers.py).
-* **SNePS Interaction**: The `sneps_wrapper.sneps_api.py` module facilitates communication with a SNePS executable (uploaded:project/Sneps-Linux-Exe-2.7.0/Sneps-2.7.0.sh). It allows for initializing the SNePS environment, informing (asserting) new facts, querying the knowledge base, listing well-formed formulas (wffs), and clearing the knowledge base.
+* **SNePS Interaction**: `PySNePS`, SNePS rewritten in Python, runs the knowledge base in-process (project/PySNePS/). It allows for initializing the SNePS environment, informing (asserting) new facts, querying the knowledge base, listing well-formed formulas (wffs), and clearing the knowledge base.
 * **Logical Representation**: The `logic_utls.logica.py` module defines classes for representing logical predicates, expressions (atomic and binary), and quantifiers (ForAll, Exists). It includes methods for negation, normalization, and skolemization of logical formulas.
 * **Command-Line Interface**: The `main.py` script provides a user-friendly console to interact with the system, offering different modes for API interaction (on/off) and specific commands for managing and querying the SNePS knowledge base.
 
@@ -26,7 +26,7 @@ This system leverages the SNePS knowledge representation and reasoning system to
 
 1.  **Python**: Version 3.11.11 🐍
 2.  **pip**: Python package installer 📦
-3.  **SNePS**: Version 2.7.0 (Expected to be located in `project/Sneps-Linux-Exe-2.7.0/`) 🧠
+3.  **PySNePS**: Version 2.8.0 (Expected to be located in `project/PySNePS/`) 🧠
 4.  **Spacy**: NLP library, along with the `en_core_web_trf` model ✨ (uploaded:project/semantic_parser/core.py)
 
 ## Installation 🛠️
@@ -34,9 +34,9 @@ This system leverages the SNePS knowledge representation and reasoning system to
 1.  Ensure Python 3.11.11 and pip are installed on your system.
 2.  Install the necessary Python packages using the following command:
     ```bash
-    pip install click prompt_toolkit spacy pexpect referencing && python -m spacy download en_core_web_trf
+    pip install click prompt_toolkit spacy referencing && python -m spacy download en_core_web_trf
+    pip install -e PySNePS
     ```
-    *(Note: `pexpect` is used by `sneps_api.py` for process interaction)*
 
 ## Usage 🚀
 
@@ -59,24 +59,24 @@ The primary way to interact with the system is through the `main.py` script.
     * `exit` / `quit` / `Ctrl+C` / `Ctrl+D`: Terminates the console application.
     * `Ctrl+L`: Clears the console screen.
 
-### Direct Access with `sneps_api.py` 🐍
+### Direct Access with `PySNePS` 🐍
 
-For more programmatic control or integration into other Python projects, the `sneps_api.py` module can be used directly.
+For more programmatic control or integration into other Python projects, `PySNePS` can be used directly.
 
 * **Import**:
     ```python
-    from sneps_wrapper.sneps_api import sneps_api, SnepsApiError, SnepsSyntaxError
+    from sneps import Network, SNePSError
     ```
 * **Functionality**:
-    * Initializes and manages the SNePS process (`Sneps-2.7.0.sh`) using `pexpect`.
-    * Provides methods like `init()`, `inform(message)`, `ask(query)`, `list_wffs()`, `clear_kb()`, and `terminate()`.
-    * Handles communication, error detection (including SNePS syntax errors), and process management.
-    * This is ideal for automating interactions with SNePS or building custom applications on top of its reasoning capabilities.
+    * Each `Network` is an independent knowledge base, no external process needed.
+    * Provides methods like `tell(text)`, `ask(query)`, `askwh(query)` and `node_text(node)`.
+    * Raises `SNePSError` for errors signalled by SNePS.
+    * See `PySNePS/README.md` for the full API.
 
 ## Core Components 🔩
 
 * **`project/main.py`**: The main entry point for the CLI application. It uses the `click` library for command-line argument parsing and `prompt_toolkit` for an enhanced interactive console experience.
-* **`project/sneps_wrapper/sneps_api.py`**: A Python wrapper for interacting with the SNePS executable. It handles spawning the SNePS process, sending commands, and parsing output. It defines custom exceptions like `SnepsApiError`, `SnepsSyntaxError`, and `SnepsInitializationError`.
+* **`project/PySNePS/`**: SNePS 2.8 rewritten in Python. `main.py` uses its `Network` class to tell, ask, list and clear the knowledge base.
 * **`project/semantic_parser/core.py`**: Contains the `snepslog` class responsible for transcribing natural language into SNePSLOG. It utilizes `spacy` for linguistic analysis.
 * **`project/logic_utls/logica.py`**: Defines Python classes for representing logical constructs such as predicates (`predicate`), logical expressions (`expression` including binary and atomic forms), and quantifiers (`ForAll`, `Exists`). It provides methods for logical operations like negation and normalization, as well as a function for `intentionalize` to transform universal intentions.
 * **`project/nlp_utils/spaCy_helpers.py`**: A suite of helper functions that use `spacy` to analyze tokens from a parsed sentence. Functions include identifying token types (e.g., `is_action`, `is_thing`), dependencies (`get_dependant`), and transforming them into logical components for SNePSLOG using the classes from `logic_utls.logica.py`.
