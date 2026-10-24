@@ -1,7 +1,7 @@
 import hashlib
 from collections import defaultdict
 from spacy.tokens import Token
-from logic_utls.logica import predicate, expression, ForAll, intentionalize
+from logic_utls.logica import predicate, expression, ForAll, Not, intentionalize
 
 def get_root(sentence: list) -> Token:
     """Returns the root token"""
@@ -56,20 +56,22 @@ def is_particle(token: Token) -> bool:
     return token.pos_ == "ADP"
 
 def is_generic(token: Token) -> bool:
-    """Checks whether the sentence speaks of things in general (Dogs bark), not of an event (Dogs barked)"""
-    return token.sent.root.tag_ in ["VBZ", "VBP"]
+    """Checks whether the sentence speaks of things in general (Dogs bark, Birds can fly), not of an event (Dogs barked)"""
+    root = token.sent.root
+    return root.tag_ in ["VBZ", "VBP"] or root.tag_ == "VB" and \
+        any(child.tag_ == "MD" and child.lemma_.lower() not in ["will", "would", "shall"] for child in root.children)
 
 def is_many(token: Token) -> bool:
     """Checks whether the token is a plural quantifier"""
     return (
         (token.tag_ in ["NNS", "NNPS"] and token.dep_ != "attr" and is_generic(token)) or
         (any(child.lemma_.lower() in ["all", "forall", "every", "each"] for child in token.children))
-    ) and not (any(child.lemma_.lower() in ["some", "many", "few", "the"] or child.dep_ == "nummod" for child in token.children))
+    ) and not (any(child.lemma_.lower() in ["some", "many", "few", "several", "most", "the"] or child.dep_ == "nummod" for child in token.children))
 
 def is_group(token: Token) -> bool:
     """Checks whether the token is a group of items"""
     return (
-        token.tag_ in ["NNS", "NNPS"] and any(child.lemma_.lower() in ["some", "many", "few", "the"] for child in token.children)
+        token.tag_ in ["NNS", "NNPS"] and any(child.lemma_.lower() in ["some", "many", "few", "several", "most", "the"] for child in token.children)
     ) and not any(is_count(child) for child in token.children)
 
 def is_count(token: Token) -> bool:
@@ -77,29 +79,74 @@ def is_count(token: Token) -> bool:
     return token.lemma_.lower() in ["many", "much"] and any(child.lemma_.lower() == "how" for child in token.children)
 
 def is_definite(token: Token) -> bool:
-    """Checks whether the token refers to something already known: the dog, John's dog"""
-    return any(child.lemma_.lower() == "the" or child.dep_ == "poss" for child in token.children)
+    """Checks whether the token refers to something already known: the dog, this dog, John's dog"""
+    return any(child.dep_ == "det" and child.lemma_.lower() in ["the", "this", "that", "these", "those"] or child.dep_ == "poss" for child in token.children)
 
 def is_condition(token: Token) -> bool:
-    """Checks whether the token is the head of an if clause"""
-    return token.dep_ == "advcl" and any(child.dep_ == "mark" and child.lemma_.lower() == "if" for child in token.children)
+    """Checks whether the token is the head of an if (or unless) clause"""
+    return token.dep_ == "advcl" and any(child.dep_ == "mark" and child.lemma_.lower() in ["if", "unless"] for child in token.children)
+
+def indefinite(token: Token) -> str:
+    """Returns the quantifier an indefinite pronoun stands for: someone -> some, everyone -> every, nobody -> no"""
+    word = token.lemma_.lower()
+    if word == "one":
+        word = "".join(child.lemma_.lower() for child in token.children if child.dep_ == "det") + word
+    return {"someone": "some", "somebody": "some", "something": "some", "anyone": "some", "anybody": "some", "anything": "some",
+            "everyone": "every", "everybody": "every", "everything": "every",
+            "nobody": "no", "noone": "no", "nothing": "no", "none": "no"}.get(word)
+
+def is_denied(token: Token) -> bool:
+    """Checks whether the clause denies a universal: Not all birds fly"""
+    return any(any(child.lemma_.lower() in ["all", "every"] for child in argument.children) and has_dependant(argument, "neg")
+               for argument in token.children)
+
+def is_command(token: Token) -> bool:
+    """Checks whether the token is the verb of a command: Give me the book"""
+    return token.dep_ == "ROOT" and token.tag_ == "VB" and not memory.asking and \
+        not any(child.dep_ in ["nsubj", "nsubjpass", "expl", "aux", "auxpass"] for child in token.children)
+
+def is_factive(token: Token) -> bool:
+    """Checks whether the verb makes what its clause says true: John knows that Mary left, John saw Mary leave"""
+    return token.lemma_.lower() in ["know", "see", "hear", "watch", "notice", "realize", "regret", "forget", "remember", "discover",
+                                    "learn", "find", "prove", "show", "understand", "make", "let", "help", "manage", "start", "begin"]
+
+def controller(clause: Token) -> str:
+    """Returns who does the action of a clause without its own subject: John tried to leave, John told Mary to leave"""
+    if clause.dep_ != "xcomp":
+        return None
+    doer = get_dependant(clause.head, "dobj") or get_dependant(clause.head, "nsubj")
+    return ref(doer) if doer is not None else None
+
+def link(clause: Token) -> str:
+    """Returns how an adverbial clause relates to its main clause: because -> cause, when -> time, otherwise its marker (after, although)"""
+    marker = next((child.lemma_.lower() for child in clause.children if child.dep_ == "mark" or child.tag_ == "WRB"), "because")
+    return {"because": "cause", "since": "cause", "as": "cause", "when": "time", "while": "time", "whenever": "time"}.get(marker, marker)
+
+def is_recipient(prep: Token) -> bool:
+    """Checks whether a to-phrase names who receives something: John gave the book to Mary"""
+    receiver = get_dependant(prep, "pobj")
+    return prep.lemma_.lower() == "to" and receiver is not None and (receiver.ent_type_ == "PERSON" or is_pron(receiver))
 
 def is_not(token: Token) -> bool:
     """Checks whether the token or its children indicate negation."""
-    if token.dep_ == "neg" or token.lemma_.lower() in ["not", "no", "never"]:
+    if token.dep_ == "neg" or token.lemma_.lower() in ["not", "no", "never", "neither", "nor"] or indefinite(token) == "no":
         return True
     return any(is_not(child) for child in token.children if child.dep_ not in ["acl", "relcl", "ccomp", "xcomp", "advcl", "conj"])
 
 def tense(token: Token) -> str:
     """Returns when the event of the token happens, or None for the present"""
     auxiliaries = [child for child in token.children if child.dep_ in ["aux", "auxpass"]]
-    if any(aux.lemma_.lower() == "will" for aux in auxiliaries):
+    if any(aux.lemma_.lower() == "will" for aux in auxiliaries) or is_going_to(token.head) and token.dep_ == "xcomp":
         return "FUTURE"
     elif token.tag_ == "VBD" or any(aux.tag_ == "VBD" or aux.lemma_.lower() == "have" for aux in auxiliaries):
         return "PAST"
     elif token.tag_ == "VBG":
         return "PRESENT"
     return None
+
+def is_going_to(token: Token) -> bool:
+    """Checks whether the token is the going of a future: John is going to leave"""
+    return token.lemma_.lower() == "go" and token.tag_ == "VBG" and has_dependant(token, "xcomp")
 
 def wh_role(token: Token) -> str:
     """Returns the role a wh-word asks about: where, when, why, how"""
@@ -112,7 +159,8 @@ def setting(prep: Token) -> str:
         return None
     elif place.ent_type_ in ["DATE", "TIME"]:
         return "time"
-    elif prep.lemma_.lower() in ["in", "at", "on", "to", "into", "near", "under", "behind", "above", "below", "inside", "outside", "beside"]:
+    elif prep.lemma_.lower() in ["in", "at", "on", "to", "into", "near", "under", "behind", "above", "below", "inside", "outside", "beside"] \
+            and not has_dependant(place, "nummod"):
         return "location"
     return None
 
@@ -135,12 +183,14 @@ class discourse:
     def forget(self):
         self.used = set()
         self.mentions = []
+        self.people = set()
         self.read(None)
 
     def read(self, sentence):
         """Starts a new sentence; a question gets variables instead of new referents"""
         self.refs = {}
         self.existentials = []
+        self.introduced = []
         self.asking = sentence is not None and sentence.text.strip().endswith("?")
 
     def new(self, token: Token, prefix: str, existential: bool = True) -> str:
@@ -157,14 +207,17 @@ class discourse:
         return new_ref
 
     def mention(self, token: Token, token_ref: str) -> str:
-        """Remembers that the token refers to token_ref"""
+        """Remembers that the token refers to token_ref, and introduces people the first time they are named"""
         if not self.asking:
             self.mentions.append((token.pos_, token.lemma_, token_ref))
+            if token.ent_type_ == "PERSON" and token_ref not in self.people:
+                self.people.add(token_ref)
+                self.introduced.append(token_ref)
         return token_ref
 
-    def last(self, pos: str, lemma: str = None) -> str:
+    def last(self, pos: str, lemma: str = None, other_than: str = None) -> str:
         """Returns the most recently mentioned referent with the given part of speech and lemma"""
-        return next((r for p, l, r in reversed(self.mentions) if p == pos and lemma in [None, l]), None)
+        return next((r for p, l, r in reversed(self.mentions) if p == pos and lemma in [None, l] and r != other_than), None)
 
 memory = discourse()
 
@@ -178,6 +231,8 @@ def _ref(token: Token) -> str:
     if token.tag_ in ["WP", "WDT", "WP$", "WRB"]:
         clause = next((ancestor for ancestor in token.ancestors if ancestor.dep_ == "relcl"), None)
         return ref(clause.head) if clause is not None else memory.new(token, "w")
+    elif indefinite(token):
+        return memory.new(token, token.lemma_.lower()[0], existential=indefinite(token) != "every")
     elif is_distinct(token):
         return memory.mention(token, token.text)
     elif is_action(token):
@@ -195,15 +250,18 @@ def _ref(token: Token) -> str:
     elif is_num(token):
         return token.text
     elif is_pron(token):
-        if token.lemma_.lower() in ["someone", "somebody", "something", "anyone", "anybody", "anything"]:
-            return memory.new(token, token.lemma_.lower()[0])
-        elif token.lemma_.lower() in ["he", "she", "his", "her"]:
-            known = memory.last("PROPN")
-        elif token.lemma_.lower() in ["it", "its", "they", "their"]:
-            known = memory.last("NOUN")
+        word = {"him": "he", "his": "he", "her": "she", "hers": "she", "its": "it", "them": "they", "their": "they", "theirs": "they",
+                "me": "i", "my": "i", "mine": "i", "your": "you", "yours": "you", "us": "we", "our": "we", "ours": "we"}.get(token.lower_, token.lemma_.lower())
+        owned = ref(token.head) if token.dep_ == "poss" else None # his dog: not the dog itself
+        if word.endswith(("self", "selves")) and has_dependant(token.head, "nsubj"):
+            return ref(get_dependant(token.head, "nsubj"))
+        elif word in ["he", "she"]:
+            known = memory.last("PROPN", other_than=owned)
+        elif word in ["it", "they"]:
+            known = memory.last("NOUN", other_than=owned)
         else:
             known = None
-        return known or token.lemma_.lower()[0] + create_var(token.lemma_.lower(), 0, 4)
+        return known or word[0] + create_var(word, 0, 4)
     elif is_particle(token):
         return memory.new(token, "p")
     else:
@@ -218,7 +276,8 @@ def predication(components: list) -> list:
     """What a state means: whatever is true of its attribute or content is true of what it refers to"""
     preds = [pred for component in components for pred in component._get_all_predicates()]
     subjects = [pred.args[1] for pred in preds if pred.predicate_name == "reference"]
-    values = [pred.args[1] for pred in preds if pred.predicate_name in ["attribute", "content"]]
+    measured = [pred.args[0] for pred in preds if pred.predicate_name == "measure"]
+    values = [pred.args[1] for pred in preds if pred.predicate_name in ["attribute", "content"] and pred.args[1] not in measured]
     stated = []
     for pred in preds:
         if len(pred.args) == 1 and pred.args[0] in values:
@@ -230,7 +289,8 @@ def predication(components: list) -> list:
 def conditional(condition, consequence) -> ForAll:
     """Returns the rule: whenever the condition happens, the consequence happens too"""
     rule = expression((condition, "=>", consequence), wrap=True)
-    variables = existentials(condition)
+    bound = [var for quant in condition._get_all_quantifiers() for var in quant.variables]
+    variables = [arg for arg in existentials(condition) if arg not in bound]
     if not variables:
         return rule
     rule = ForAll(variables, rule)
@@ -238,6 +298,38 @@ def conditional(condition, consequence) -> ForAll:
         if arg not in variables:
             rule.skolemize_arg(arg, variables)
     return rule
+
+def is_reciprocal(token: Token) -> bool:
+    """Checks whether the verb is done to each other"""
+    return any(child.dep_ == "dobj" and child.lemma_.lower() == "other" and has_dependant(child, "det") for child in token.children)
+
+def reciprocal(token: Token, result: list) -> list:
+    """Returns one event for each pair: John and Mary love each other -> John loves Mary and Mary loves John"""
+    other = ref(get_dependant(token, "dobj"))
+    agents = [pred.args[1] for pred in result if isinstance(pred, predicate) and pred.predicate_name == "agent"]
+    rest = [pred for pred in result if isinstance(pred, predicate) and pred.predicate_name not in ["agent", "object"] and other not in pred.args]
+    events = []
+    for doer in agents:
+        for done in agents:
+            if doer != done:
+                event = memory.new(token, "e")
+                events.extend(predicate(pred.predicate_name, [event if arg == ref(token) else arg for arg in pred.args]) for pred in rest)
+                events.extend([predicate("agent", [event, doer]), predicate("object", [event, done])])
+    return events
+
+def existence(token: Token) -> expression:
+    """Returns what a there-sentence says: There is a dog in the garden -> dog(d) and in(d, g) and garden(g)"""
+    thing = get_dependant(token, "attr")
+    result = [predicate(thing.lemma_, [ref(thing)])] + _get_components(thing)
+    for child in token.children:
+        if child.dep_ == "prep":
+            result.extend(get_components(child, child.text, ref(thing)))
+            if setting(child):
+                result.append(predicate(setting(child), [ref(thing), ref(get_dependant(child, "pobj"))]))
+    result = coordinate(result)
+    if is_not(token):
+        result = ForAll(existentials(result) or [ref(thing)], combine(result, True))
+    return result
 
 def get_actors(token: Token) -> list:
     """Returns a list of actors of the given token"""
@@ -315,15 +407,21 @@ def _get_components(token: Token, reference: str=None, var: str=None, level: int
     for child in token.children:
         if child.dep_ == "amod" and is_count(child):
             _components.append(predicate("quantity", [memory.new(child, "n"), true_ref]))
+        elif child.dep_ == "amod" and child.lemma_.lower() in ["some", "many", "few", "several", "most"]:
+            continue
         elif child.dep_ == "amod":
-            mod = predicate(child.lemma_, [true_ref])
+            mod = predicate(child.lower_ if child.tag_ in ["JJR", "JJS"] else child.lemma_, [true_ref])
             mod = mod.negate() if has_dependant(child, "neg") else mod
             _components.append(mod)
             other = _get_components(child, reference, var, level)
             if other:
                 _components.extend(other)
+        elif child.dep_ == "advmod" and child.lemma_.lower() == "how" and is_modifier(token): # how old: asks for the measure
+            _components.append(predicate("measure", [true_ref, ref(child)]))
+            _components.append(predicate("quantity", [memory.new(child, "n"), ref(child)]))
         elif child.dep_ == "advmod":
-            mod = predicate(child.lemma_, [true_ref, token.lemma_])
+            nominal = reference and (is_thing(token) or is_distinct(token) or is_pron(token))
+            mod = predicate(child.lemma_, [reference, true_ref] if nominal else [true_ref, token.lemma_])
             mod = mod.negate() if has_dependant(child, "neg") else mod
             _components.append(mod)
             other = _get_components(child, reference, var, level)
@@ -349,6 +447,10 @@ def _get_components(token: Token, reference: str=None, var: str=None, level: int
             _components.extend(get_components(child, child.text, true_ref, var, level))
         elif child.dep_ == "poss":
             _components.extend(get_components(child, "possessor", true_ref, None, level))
+        elif child.dep_ == "npadvmod":
+            _components.extend(get_components(child, "measure", true_ref, None, level))
+        elif child.dep_ == "nsubj" and is_modifier(token):
+            _components.append(predicate(token.text, [ref(child)]))
         elif child.dep_ == "compound":
             _components.append(predicate(child.lemma_, [true_ref]))
             other = _get_components(child, reference, true_ref, level)
@@ -369,6 +471,10 @@ def _get_components(token: Token, reference: str=None, var: str=None, level: int
             continue
         elif child.dep_ == "punct":
             continue
+        elif child.dep_ == "neg":
+            continue
+        elif child.dep_ == "preconj":
+            continue
         else:
             print(f"Warning: {child.dep_} not implemented BASE_2")
     return _components
@@ -379,9 +485,15 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
     if token is None:
         return components
     
-    elif is_distinct(token) or is_pron(token) or is_num(token) or token.tag_ == "WP$":
+    elif indefinite(token) == "every":
+        kind = "thing" if token.lemma_.lower().endswith("thing") else "person"
+        components.append(ForAll([ref(token)], expression((predicate(kind, [ref(token)]), "=>", predicate(role, [reference, ref(token)])))))
+
+    elif is_distinct(token) or is_pron(token) or is_num(token) or token.tag_ == "WP$" or indefinite(token):
     
         components.append(predicate(role, [reference, ref(token)]))
+        if indefinite(token) and not token.lemma_.lower().endswith("thing"):
+            components.append(predicate("person", [ref(token)]))
         components.extend(_get_components(token, reference, var, level))
     
     elif is_thing(token):
@@ -405,12 +517,15 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
 
         elif is_group(token):
 
+            amount = next((child.lemma_.lower() for child in token.children if child.lemma_.lower() in ["many", "few", "several", "most"]), None)
+            if amount:
+                components.append(predicate("quantity", [amount, ref(token)]))
             components.append(
                 ForAll(
                     [create_var("thing", level)],
                     expression( (
                         predicate("member", [create_var("thing", level), ref(token)]),
-                        "<=>",
+                        "<=>" if is_definite(token) else "=>",
                         expression((
                             coordinate(_get_components(token, reference, create_var("thing", level), level)),
                             "and",
@@ -438,8 +553,11 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
 
     elif is_action(token) or is_state(token):
 
-        components.append(predicate(role, [reference, ref(token)]))
-        components.append(main_snepslog(token))
+        if token.dep_ in ["xcomp", "ccomp"] and not is_factive(token.head):
+            components.append(predicate(role, [reference, f"({main_snepslog(token, controller(token))})"]))
+        else:
+            components.append(predicate(role, [reference, ref(token)]))
+            components.append(main_snepslog(token, controller(token)))
 
     elif is_modifier(token):
 
@@ -456,12 +574,12 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
 
     elif is_particle(token):
 
-        skip = next((child for child in token.children), True)
+        skip = next((child for child in token.children), None)
         if skip:
             components.extend(get_components(skip, role, reference, var, level))
 
     elif token.pos_ in ["SCONJ"]:
-        skip = next((child for child in token.children), True)
+        skip = next((child for child in token.children), None)
         if skip:
             components.extend(get_components(skip, token.text, reference, var, level))
     else:
@@ -481,45 +599,61 @@ def get_components(token: Token, role: str=None, reference: str=None, var: str=N
 
     return components
 
-def main_snepslog(token: Token) -> expression:
+def main_snepslog(token: Token, subject: str = None) -> expression:
 
     if token is None:
         raise Exception("No token provided")
+    if has_dependant(token, "expl") and has_dependant(token, "attr"):
+        return existence(token)
+    doer = get_dependant(token, "nsubj")
+    if is_going_to(token) and not is_not(token):
+        return main_snepslog(get_dependant(token, "xcomp"), ref(doer) if doer is not None else subject)
     seed = 0
     name = token.lemma_ if not is_state(token) else "state"
-    negation = is_not(token)
+    denied = is_denied(token)
+    modal = next((child for child in token.children if child.tag_ == "MD" and child.lemma_.lower() not in ["will", "shall"]), None)
+    outer = modal is not None and modal.lemma_.lower() in ["can", "could", "may"] and is_not(token) # cannot: not possible
+    negation = is_not(token) and not denied and not outer
     result = [predicate(name, [ref(token)])]
+    if subject is not None and doer is None and not has_dependant(token, "nsubjpass"):
+        result.append(predicate("reference" if is_state(token) else "agent", [ref(token), subject]))
     conjunct = None
     connective = None
     condition = None
+    asked = is_state(token) and any(child.dep_ == "attr" and child.tag_ in ["WP", "WDT"] for child in token.children) # What is X?
 
     for child in token.children:
         
         roles = {
-            "nsubj": "reference" if is_state(token) else "agent",
+            "nsubj": ("attribute" if asked else "reference") if is_state(token) else "agent",
             "dobj": "object",
             "nsubjpass": "object",
             "agent": "agent",
             "dative": "recipient",
-            "prep": child.text,
+            "prep": "recipient" if is_recipient(child) else child.text,
             "xcomp": "concerns",
             "npadvmod": "time",
             "ccomp": "concerns",
             "dep": "dependant",
-            "advcl": "cause",
+            "advcl": link(child),
             "acomp": "content",
-            "attr": "attribute",
+            "attr": "reference" if asked else "attribute",
             "pobj": "object",
         }
 
         if is_condition(child):
             condition = main_snepslog(child)
+            if any(mark.lemma_.lower() == "unless" for mark in child.children):
+                condition = ForAll(existentials(condition) or [ref(child)], combine(condition, True))
 
         elif child.dep_ in roles:
             result.extend(get_components(child, roles[child.dep_], ref(token), None, seed))
             if child.dep_ == "prep" and setting(child):
                 result.append(predicate(setting(child), [ref(token), ref(get_dependant(child, "pobj"))]))
             seed += len(result)
+
+        elif child.tag_ == "WRB" and token.dep_ == "advcl": # when John arrived: the marker of the clause
+            continue
 
         elif child.tag_ == "WRB" and wh_role(child):
             result.append(predicate(wh_role(child), [ref(token), ref(child)]))
@@ -532,16 +666,18 @@ def main_snepslog(token: Token) -> expression:
             result.extend(_get_components(child, None, ref(token), seed))
 
         elif child.dep_ == "conj":
-            conjunct = main_snepslog(child)
+            conjunct = main_snepslog(child, ref(doer) if doer is not None else subject)
 
         elif child.dep_ == "cc":
-            connective = child.text
+            connective = "or" if child.lemma_.lower() == "or" else "and"
 
     if is_state(token) and not negation:
         result.extend(predication(result))
     when = tense(token)
     if when:
         result.append(predicate("culminate", [ref(token), when]))
+    if is_reciprocal(token):
+        result = reciprocal(token, result)
     result = intentionalize(coordinate(result))
 
     if list(result.quantifiers):
@@ -561,6 +697,13 @@ def main_snepslog(token: Token) -> expression:
         if negation:
             result = combine(result, negation)
             result = ForAll(existentials(result) or [ref(token)], result)
+    if denied:
+        result = Not(result)
+    if modal is not None:
+        result = predicate(modal.lemma_.lower(), [f"({result})"])
+        result = result.negate() if outer else result
+    elif is_command(token):
+        result = predicate("command", [f"({result})"])
     if condition:
         result = conditional(condition, result)
     if conjunct:

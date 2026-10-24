@@ -465,6 +465,31 @@ class Exists:
     def _get_all_segments(self):
         yield self
 
+class Not:
+    """The negation of a whole formula, like a rule: ~(all(x)(P(x) => Q(x)))"""
+    def __init__(self, formula):
+        if not (hasattr(formula, 'negate') and callable(formula.negate)):
+            raise TypeError("Negated formula lacks .negate().")
+        self.formula = formula
+
+    def __str__(self):
+        return f"~({self.formula})"
+
+    def negate(self):
+        return copy.deepcopy(self.formula)
+
+    def _get_all_binary_expressions(self):
+        yield from self.formula._get_all_binary_expressions()
+
+    def _get_all_predicates(self):
+        yield from self.formula._get_all_predicates()
+
+    def _get_all_quantifiers(self):
+        yield from self.formula._get_all_quantifiers()
+
+    def _get_all_segments(self):
+        yield self
+
 class AndOr:
     def __init__(self, pair: tuple[int, int], expressions: list[expression]):
         """

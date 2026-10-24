@@ -18,4 +18,6 @@ class snepslog:
 
     def _sneps(self, sentence: Span) -> str:
         memory.read(sentence)
-        return str(main_snepslog(get_root(sentence)))
+        formula = str(main_snepslog(get_root(sentence)))
+        people = [f"person({name})" for name in memory.introduced]
+        return " and ".join([f"({formula})"] + people) if people else formula
