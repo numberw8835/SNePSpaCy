@@ -9,6 +9,7 @@ This project provides a command-line interface and a Python API to interact with
 - [Installation 🛠️](#installation-%EF%B8%8F)
 - [Usage 🚀](#usage-)
   - [Command-Line Interface (CLI) ⌨️](#command-line-interface-cli-%EF%B8%8F)
+  - [Guide: what it understands 🧭](GUIDE.md)
   - [Direct Access with `PySNePS` 🐍](#direct-access-with-pysneps-)
 - [Core Components 🔩](#core-components-)
 - [Intellectual Property ©™️](#intellectual-property-%EF%B8%8F)
@@ -59,6 +60,8 @@ The primary way to interact with the system is through the `main.py` script.
     * `clearkb`: Clears all information from the SNePS knowledge base, and forgets what was mentioned. Requires API mode to be 'on'.
     * `exit` / `quit` / `Ctrl+C` / `Ctrl+D`: Terminates the console application.
     * `Ctrl+L`: Clears the console screen.
+
+* **[GUIDE.md](GUIDE.md)** shows one example of every kind of sentence and question the console understands.
 
 ### Grapher 🌳
 
